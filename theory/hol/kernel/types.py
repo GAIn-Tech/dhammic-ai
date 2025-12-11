@@ -147,7 +147,7 @@ def type_vars(ty: Type) -> set[TyVar]:
     elif isinstance(ty, TyBase):
         return set()
     elif isinstance(ty, TyApp):
-        result: set[TyVar] = set()
+        result: set[TyVar] = type_vars(ty.op)
         for arg in ty.args:
             result |= type_vars(arg)
         return result
@@ -171,10 +171,11 @@ def type_subst(subst: dict[TyVar, Type], ty: Type) -> Type:
     elif isinstance(ty, TyBase):
         return ty
     elif isinstance(ty, TyApp):
+        new_op = type_subst(subst, ty.op)
         new_args = tuple(type_subst(subst, arg) for arg in ty.args)
-        if new_args == ty.args:
+        if new_op == ty.op and new_args == ty.args:
             return ty
-        return TyApp(ty.op, new_args)
+        return TyApp(new_op, new_args)
     else:
         raise TypeError(f"Unknown type: {ty}")
 

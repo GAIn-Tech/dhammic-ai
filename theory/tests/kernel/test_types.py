@@ -94,6 +94,13 @@ class TestTypeVariables:
         fn = mk_fun_ty(a, b)
         assert type_vars(fn) == {a, b}
 
+    def test_type_vars_in_operator(self):
+        """Type variables in operators are collected."""
+        f = TyVar("f")
+        a = TyVar("a")
+        app = TyApp(f, [a])
+        assert type_vars(app) == {f, a}
+
 
 class TestTypeSubstitution:
     """Test type substitution."""
@@ -118,6 +125,16 @@ class TestTypeSubstitution:
         dom, rng = dest_fun_ty(result)
         assert dom == bool_ty
         assert rng == b
+
+    def test_subst_in_operator(self):
+        """Substitution applies to operators."""
+        f = TyVar("f")
+        a = TyVar("a")
+        app = TyApp(f, [a])
+        list_ty = TyBase("list")
+        result = type_subst({f: list_ty}, app)
+        assert result.op == list_ty
+        assert result.args == (a,)
 
 
 class TestTypeMatching:
