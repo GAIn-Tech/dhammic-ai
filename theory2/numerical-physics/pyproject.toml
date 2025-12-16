@@ -1,0 +1,16 @@
+[project]
+name = "theory2-numerical-physics"
+version = "0.1.0"
+description = "Numerical physics module (GPU4PySCF, Qiskit)"
+requires-python = ">=3.11"
+
+dependencies = [
+    "theory2-shared",
+    "qiskit>=2.2",
+    "qiskit-aer>=0.17",
+    "scipy>=1.11.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

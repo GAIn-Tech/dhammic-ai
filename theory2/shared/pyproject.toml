@@ -1,0 +1,17 @@
+[project]
+name = "theory2-shared"
+version = "0.1.0"
+description = "Shared utilities for theory2 (GPU manager, config, I/O)"
+requires-python = ">=3.11"
+
+dependencies = [
+    "click>=8.1.0",
+    "rich>=13.0.0",
+    "loguru>=0.7.0",
+    "numpy>=1.24.0",
+    "torch>=2.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

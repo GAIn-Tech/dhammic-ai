@@ -1,0 +1,66 @@
+# Theory2 Configuration File
+# Generated: 2025-12-16
+# Design Document: docs/plans/2025-12-16-math-physics-tooling-design.md
+
+# ============================================================================
+# Hardware Configuration (Section 6.1)
+# ============================================================================
+[hardware]
+gpu_device = "cuda:0"  # or "cpu" for CPU-only
+vram_limit_gb = 12
+num_threads = 16       # For CPU parallelism
+
+# ============================================================================
+# Model Configuration (Section 6.1)
+# ============================================================================
+[models]
+math_llm_specialized = "qwen2.5-math:7b-instruct"
+math_llm_general = "qwen3:8b"
+default_math_llm = "qwen2.5-math:7b-instruct"
+ollama_host = "http://localhost:11434"
+
+# ============================================================================
+# Computation Configuration (Section 6.1)
+# ============================================================================
+[computation]
+precision = "double"   # or "quad" for mpmath arbitrary precision
+use_numba = true
+use_cupy = true        # Auto-disables if no GPU
+batch_size_auto = true # Auto-tune batch sizes for VRAM
+
+# ============================================================================
+# Logging Configuration (Section 6.1)
+# ============================================================================
+[logging]
+level = "INFO"         # DEBUG, INFO, WARNING, ERROR
+output_dir = "logs/"
+use_rich = true        # Rich console output
+rotate_logs = true
+max_log_size_mb = 100
+
+# ============================================================================
+# Path Configuration (Section 6.1)
+# ============================================================================
+[paths]
+data_dir = "data/"
+models_dir = "models/"
+cache_dir = ".cache/"
+
+# ============================================================================
+# CLI Configuration (Section 18.12)
+# ============================================================================
+[cli]
+default_output = "rich"  # or "json" for LLM mode
+default_timeout_ms = 30000
+enable_session_persistence = true
+session_dir = ".sessions/"
+
+[cli.verification]
+auto_cross_check = true  # Automatically verify with multiple tools
+confidence_threshold = 0.95
+max_relative_error = 1e-6
+
+[cli.explain]
+verbosity = "medium"  # low, medium, high, ultra
+include_references = true
+include_next_actions = true

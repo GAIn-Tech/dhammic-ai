@@ -1,0 +1,15 @@
+[project]
+name = "theory2-math-ai"
+version = "0.1.0"
+description = "Math AI module (Qwen, Z3, cvc5, Ollama)"
+requires-python = ">=3.11"
+
+dependencies = [
+    "theory2-shared",
+    "z3-solver>=4.12.0",
+    "requests>=2.31.0",  # For Ollama API
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

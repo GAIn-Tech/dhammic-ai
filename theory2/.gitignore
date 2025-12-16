@@ -1,0 +1,92 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+*/venv/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Cache
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyc
+
+# Data (too large)
+data/
+models/*.pt
+*.npz
+*.pkl
+*.pickle
+
+# Ollama models (download separately)
+.ollama/
+
+# Session data
+.sessions/
+
+# Lock files (keep uv.lock for reproducibility)
+# uv.lock  # Uncomment if you want to exclude lock files
+
+# Coverage
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Compiled extensions
+*.so
+*.dylib
+*.dll
+
+# Lean 4
+.lake/
+lakefile.olean
+
+# SageMath
+*.sage-backup
+
+# OS
+Thumbs.db
+.DS_Store

@@ -1,0 +1,15 @@
+[project]
+name = "theory2-physics-ml"
+version = "0.1.0"
+description = "Physics ML module (NeuralOperator, e3nn, DeepXDE)"
+requires-python = ">=3.11"
+
+dependencies = [
+    "theory2-shared",
+    "torch>=2.0.0",
+    "einops>=0.7.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

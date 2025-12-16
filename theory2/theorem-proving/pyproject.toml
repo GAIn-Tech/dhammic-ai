@@ -1,0 +1,13 @@
+[project]
+name = "theory2-theorem-proving"
+version = "0.1.0"
+description = "Theorem proving module (Lean 4, LeanHammer)"
+requires-python = ">=3.11"
+
+dependencies = [
+    "theory2-shared",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
