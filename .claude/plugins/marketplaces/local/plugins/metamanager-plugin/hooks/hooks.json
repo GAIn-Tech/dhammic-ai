@@ -1,0 +1,18 @@
+{
+  "description": "Metamanager task orchestration hook system - intercepts TodoWrite operations for conflict detection",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "TodoWrite",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -m hooks.todoupdate",
+            "timeout": 10,
+            "description": "Detect task conflicts and orchestration issues before applying changes"
+          }
+        ]
+      }
+    ]
+  }
+}

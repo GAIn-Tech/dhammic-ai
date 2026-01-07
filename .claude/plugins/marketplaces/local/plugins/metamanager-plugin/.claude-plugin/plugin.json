@@ -1,0 +1,20 @@
+{
+  "name": "metamanager-plugin",
+  "description": "Automated task orchestration metamanager - detects conflicts in TodoWrite operations, creates dependency graphs, coordinates specialized agents for execution planning and delegation, and maintains task state in Supermemory",
+  "version": "1.0.0",
+  "author": {
+    "name": "Michael Brown"
+  },
+  "homepage": "https://github.com/anthropics/metamanager-plugin",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anthropics/metamanager-plugin"
+  },
+  "license": "MIT",
+  "capabilities": {
+    "hooks": ["PreToolUse"],
+    "agents": ["orchestrator", "planner", "executor"],
+    "skills": ["dependency-analysis", "conflict-resolution", "execution-planning"],
+    "commands": ["analyze", "plan", "resolve", "visualize", "delegate"]
+  }
+}
