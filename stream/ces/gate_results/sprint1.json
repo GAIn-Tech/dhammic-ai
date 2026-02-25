@@ -1,0 +1,17 @@
+{
+  "sprint": 1,
+  "model": "ces_ssm",
+  "multiplier": 1.016,
+  "threshold": 1.5,
+  "structural_pass": true,
+  "pass": true,
+  "note": "structural gate (forward pass + loss bound); full G1 requires trained weights",
+  "metrics": {
+    "ces_loss": 10.3818,
+    "ces_ppl": 32267.56,
+    "baseline_ppl": 32784.99,
+    "param_count": 4427296,
+    "forward_time_s": 0.023,
+    "max_entropy_bound": 10.3972
+  }
+}

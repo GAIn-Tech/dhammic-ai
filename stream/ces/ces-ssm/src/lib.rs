@@ -55,6 +55,109 @@ fn softplus(x: &Tensor) -> Result<Tensor> {
 
 pub fn placeholder() {}
 
+// ─── RWKV v6 WKV Mechanism ────────────────────────────────────────────────────
+//
+// The WKV (Weighted Key-Value) attention mechanism from RWKV v6.
+// This is the "cerebellum" fast-predict secondary track.
+//
+// Mathematical formulation (recurrent form):
+//   At each timestep t:
+//     u_t = exp(w)                     (time-decay per channel)
+//     a_t = exp(k_t)                   (key magnitude)
+//     numerator:   n_t = u_t * a_t * v_t + exp(w_prev) * n_{t-1}
+//     denominator: d_t = u_t * a_t     + exp(w_prev) * d_{t-1}
+//     wkv_t = n_t / max(|d_t|, 1)     (normalized output)
+//     state update: w_prev = w_prev + w (accumulated decay log)
+//
+// Simplified scalar sequential reference (gradient-compatible):
+//   For each position t: output = r * wkv(k, v, w, u, state)
+//   where r, k, v are projections of x; w is log-decay; u is bonus weight.
+
+/// RWKV v6 WKV sequential forward pass.
+///
+/// # Arguments
+/// - `x`:  (B, T, D) — input
+/// - `r`:  (B, T, D) — receptance gate
+/// - `k`:  (B, T, D) — key
+/// - `v`:  (B, T, D) — value
+/// - `w`:  (D,) — log time-decay (≤ 0)
+/// - `u`:  (D,) — bonus (first-token weight)
+///
+/// # Returns
+/// `y: (B, T, D)` — WKV output (before output projection)
+pub fn rwkv_wkv_forward(
+    r: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    w: &Tensor,
+    u: &Tensor,
+) -> Result<Tensor> {
+    let (batch, seq_len, d_model) = r.dims3()?;
+    let device = r.device();
+
+    let mut state_num = Tensor::zeros((batch, d_model), DType::F32, device)?;
+    let mut state_den = Tensor::zeros((batch, d_model), DType::F32, device)?;
+    let w_row = w
+        .reshape((1, d_model))?
+        .broadcast_as((batch, d_model))?
+        .contiguous()?;
+    let mut state_w_acc = w_row.clone();
+
+    let u_bcast = u
+        .reshape((1, d_model))?
+        .broadcast_as((batch, d_model))?
+        .contiguous()?;
+
+    let mut outputs: Vec<Tensor> = Vec::with_capacity(seq_len);
+
+    for t in 0..seq_len {
+        let r_t = r.narrow(1, t, 1)?.squeeze(1)?;
+        let k_t = k.narrow(1, t, 1)?.squeeze(1)?;
+        let v_t = v.narrow(1, t, 1)?.squeeze(1)?;
+
+        let ek = k_t.exp()?;
+        let eu = u_bcast.exp()?.broadcast_mul(&ek)?;
+        let decay = state_w_acc.exp()?;
+
+        let new_num = (eu.broadcast_mul(&v_t)? + decay.broadcast_mul(&state_num)?)?;
+        let new_den = (eu + decay.broadcast_mul(&state_den)?)?;
+
+        let eps = 1e-8f32;
+        let denom_safe = new_den.abs()?.clamp(eps, f32::MAX)?;
+        let wkv_t = new_num.broadcast_div(&denom_safe)?;
+
+        let out_t = r_t.broadcast_mul(&wkv_t)?;
+        outputs.push(out_t.unsqueeze(1)?);
+
+        state_num = new_num;
+        state_den = new_den;
+        state_w_acc = (state_w_acc + &w_row)?;
+    }
+
+    Tensor::cat(&outputs, 1)
+}
+
+/// Dual-track learned gating merge.
+///
+/// Mixes Mamba (SSM) and RWKV outputs with a learned scalar gate per head:
+///   y = g ⊙ y_mamba + (1 - g) ⊙ y_rwkv
+///   g = sigmoid(gate_weights · x_avg)
+///
+/// # Arguments
+/// - `y_mamba`: (B, T, H)
+/// - `y_rwkv`:  (B, T, H)
+/// - `gate`:    (H,) — learned gating logit per channel
+///
+/// Returns `y: (B, T, H)`.
+pub fn dual_track_merge(y_mamba: &Tensor, y_rwkv: &Tensor, gate: &Tensor) -> Result<Tensor> {
+    let (_b, _t, h) = y_mamba.dims3()?;
+    let g = gate.reshape((1, 1, h))?.broadcast_as(y_mamba.shape())?;
+    let g: Tensor = g.neg()?.exp()?.affine(1.0, 1.0)?.recip()?;
+    let one_minus_g = (g.ones_like()? - &g)?;
+    let merged = (g.broadcast_mul(y_mamba)? + one_minus_g.broadcast_mul(y_rwkv)?)?;
+    Ok(merged)
+}
+
 // ─── Multi-Scale Temporal Heads ───────────────────────────────────────────────
 //
 // K=4 head groups with fixed Δt ∈ {0.01, 0.1, 1.0, 10.0} per architecture spec.
@@ -454,6 +557,102 @@ mod tests {
         assert!(
             diff > 1e-6,
             "fast and slow head groups should produce different outputs, diff={diff}"
+        );
+    }
+
+    #[test]
+    fn rwkv_forward_shape_and_finite() {
+        let device = Device::Cpu;
+        let (b, t, d) = (2usize, 8usize, 16usize);
+        let r = Tensor::randn(0f32, 0.5f32, (b, t, d), &device).unwrap();
+        let k = Tensor::randn(0f32, 0.5f32, (b, t, d), &device).unwrap();
+        let v = Tensor::randn(0f32, 0.5f32, (b, t, d), &device).unwrap();
+        let w = Tensor::full(-0.5f32, d, &device).unwrap();
+        let u = Tensor::full(0.5f32, d, &device).unwrap();
+
+        let y = rwkv_wkv_forward(&r, &k, &v, &w, &u).unwrap();
+        assert_eq!(y.dims(), &[b, t, d], "rwkv output shape must be (B,T,D)");
+
+        let vals = y.flatten_all().unwrap().to_vec1::<f32>().unwrap();
+        for v in &vals {
+            assert!(v.is_finite(), "rwkv output has non-finite value: {v}");
+        }
+        println!(
+            "rwkv_forward_shape_and_finite: passed, shape {:?}",
+            y.dims()
+        );
+    }
+
+    #[test]
+    fn rwkv_zero_input_bounded_output() {
+        let device = Device::Cpu;
+        let (b, t, d) = (1usize, 4usize, 8usize);
+        let zeros = Tensor::zeros((b, t, d), DType::F32, &device).unwrap();
+        let w = Tensor::full(-1.0f32, d, &device).unwrap();
+        let u = Tensor::zeros(d, DType::F32, &device).unwrap();
+
+        let y = rwkv_wkv_forward(&zeros, &zeros, &zeros, &w, &u).unwrap();
+        let vals = y.flatten_all().unwrap().to_vec1::<f32>().unwrap();
+        for v in &vals {
+            assert!(v.is_finite(), "zero-input rwkv has non-finite output: {v}");
+        }
+        println!("rwkv_zero_input_bounded_output: passed");
+    }
+
+    #[test]
+    fn dual_track_merge_interpolates() {
+        let device = Device::Cpu;
+        let (b, t, h) = (2usize, 6usize, 8usize);
+        let y_m = Tensor::ones((b, t, h), DType::F32, &device).unwrap();
+        let y_r = Tensor::zeros((b, t, h), DType::F32, &device).unwrap();
+
+        let gate_high = Tensor::full(10.0f32, h, &device).unwrap();
+        let y_high = dual_track_merge(&y_m, &y_r, &gate_high).unwrap();
+        let mean_high = y_high
+            .flatten_all()
+            .unwrap()
+            .to_vec1::<f32>()
+            .unwrap()
+            .iter()
+            .sum::<f32>()
+            / (b * t * h) as f32;
+        assert!(
+            mean_high > 0.99,
+            "gate=10 should pass mostly mamba: mean={mean_high}"
+        );
+
+        let gate_low = Tensor::full(-10.0f32, h, &device).unwrap();
+        let y_low = dual_track_merge(&y_m, &y_r, &gate_low).unwrap();
+        let mean_low = y_low
+            .flatten_all()
+            .unwrap()
+            .to_vec1::<f32>()
+            .unwrap()
+            .iter()
+            .sum::<f32>()
+            / (b * t * h) as f32;
+        assert!(
+            mean_low < 0.01,
+            "gate=-10 should pass mostly rwkv: mean={mean_low}"
+        );
+
+        let gate_zero = Tensor::zeros(h, DType::F32, &device).unwrap();
+        let y_mid = dual_track_merge(&y_m, &y_r, &gate_zero).unwrap();
+        let mean_mid = y_mid
+            .flatten_all()
+            .unwrap()
+            .to_vec1::<f32>()
+            .unwrap()
+            .iter()
+            .sum::<f32>()
+            / (b * t * h) as f32;
+        assert!(
+            (mean_mid - 0.5).abs() < 0.01,
+            "gate=0 should be ~50/50 mix: mean={mean_mid}"
+        );
+
+        println!(
+            "dual_track_merge_interpolates: gate=10→{mean_high:.3}, gate=0→{mean_mid:.3}, gate=-10→{mean_low:.3}"
         );
     }
 }
