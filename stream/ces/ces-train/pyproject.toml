@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ces-train"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.0",
+    "datasets>=2.0",
+    "sentencepiece>=0.1.99",
+    "numpy>=1.24",
+    "tqdm>=4.65",
+]
+
+[project.optional-dependencies]
+wandb = ["wandb>=0.15"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ces_train*"]
