@@ -317,3 +317,39 @@
   → FIX: Removed unused import
 - Unused variable warning: loop counter `i` in `dvfs_log_bounded` test
   → FIX: Changed to `_` (unused variable pattern)
+
+## [2026-02-26] Task 4.1: Cortical Column MoE Routing (ces-moe)
+
+### Implementation
+- `ColumnExpert`: d_in × d_out weight matrix (row-major), timescale_bias (f32), timescale_vec (d_in)
+  - Forward: h = relu(W·x + timescale_bias) — standard single-layer expert
+  - Confidence: dot(timescale_vec, x).tanh().abs() — timescale-based input affinity
+- `LoadTracker`: per-expert activation counts, CV = std/mean across experts
+- `CorticalColumnMoE`: n_experts=8, top_k=2, d_model=768, d_expert=384
+  - Routing: compute all expert confidences → select top-k → softmax(top-k scores) → weighted average
+  - Output projection: per-expert d_model × d_expert matrix projects hidden back to model dim
+  - Load balance: CV < 0.3 over 1000 diverse inputs (achieved ~0.05 with xorshift-diverse inputs)
+
+### Math Helpers (pure Rust, no external deps)
+- `mat_vec_mul`: row-major M(rows×cols) · x(cols) → y(rows)
+- `softmax_topk`: numerically stable (max subtraction), uniform fallback for degenerate case
+- `lehmer_rng`: deterministic init (same pattern as ces-hebbian)
+
+### Key Design Decisions
+- Confidence = |tanh(dot(tv, x))| ensures [0,1] range and handles both positive/negative correlations
+- tanh compression prevents any single expert from dominating (even with large dot products)
+- With 8 experts in 64+ dimensions, timescale_vecs are nearly orthogonal → diverse routing
+- xorshift PRNG for test inputs (better diversity than lehmer_rng for this use case)
+
+### Test Coverage (21/21 pass)
+- 7 column_routing_* tests: forward_shape, top_k_selected, different_inputs, dimension_mismatch, top_k_validation, output_finite, default_config
+- 4 load_balance/load_tracker tests: cv_below_threshold (CV<0.3), counts_experts, cv_uniform, reset
+- 4 voting_* tests: confidence_nonzero, confidence_bounded, output_is_weighted_average, weights_sum_to_one
+- 2 expert unit tests: forward_shape, relu_nonnegative
+- 2 softmax helper tests: sums_to_one, ordering
+- 2 proptest: property_output_bounded (convex combination norm bound), property_output_is_weighted_average
+
+### Load Balance Analysis
+- With top_k=2 of 8 experts, 1000 inputs → 2000 activations, expected 250/expert
+- Near-orthogonal timescale_vecs in high dimensions → ranking shuffles frequently across inputs
+- Achieved CV ≈ 0.05, well below 0.3 threshold

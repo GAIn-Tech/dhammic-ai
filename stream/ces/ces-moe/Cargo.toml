@@ -1,0 +1,16 @@
+[package]
+name = "ces-moe"
+version = "0.1.0"
+edition = "2021"
+description = "Cortical Column MoE routing"
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lib]
+name = "ces_moe"
