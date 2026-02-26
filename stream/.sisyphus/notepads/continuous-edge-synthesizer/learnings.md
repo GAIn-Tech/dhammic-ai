@@ -271,3 +271,49 @@
 - Pure Hebbian LoRA from random init does NOT decrease CE loss — needs pretrained backbone
 - Two-phase test: Phase 1 gradient-trains backbone (vocab=16, lr=0.5, 500 steps), Phase 2 Hebbian-only
 - Phase 2 achieves ratio=0.597 < 0.80 → PASS (40% further improvement on structured bigram task)
+
+## [2026-02-26] Task 4.2: Software DVFS Power Management (ces-inference)
+
+### Implementation
+- `ComplexitySignal`: surprise ∈ [0,1], sparsity ∈ [0,1] (fraction of active neurons)
+- `ComputeMode`: Minimal (8-bit, 1 expert) < Reduced (16-bit, n/2 experts) < Full (32-bit, all experts)
+- `DvfsController`: heuristic mapping from complexity → compute mode
+  - High complexity: surprise > 0.7 OR sparsity < 0.05 → Full
+  - Low complexity: surprise < 0.3 AND sparsity > 0.15 → Minimal
+  - Medium: Reduced
+- `DvfsLog`: bounded VecDeque (max 1000 entries), tracks decision history, computes avg_compute_level()
+
+### Linux cpufreq Integration (cfg-gated)
+- `read_cpufreq_khz()`: reads `/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq`
+- `set_cpufreq_governor(governor)`: writes to `scaling_governor`, gracefully handles PermissionDenied
+- Non-Linux platforms: stub implementations with tracing::debug! logs
+- Test strategy: unit test controller logic separately from sysfs I/O (no actual sysfs writes in tests)
+
+### Test Coverage (14/14 pass ✓)
+- `dvfs_high_surprise_gives_full_compute`: surprise=0.9, sparsity=0.01 → Full
+- `dvfs_low_surprise_gives_minimal_compute`: surprise=0.1, sparsity=0.5 → Minimal
+- `dvfs_medium_gives_reduced`: surprise=0.5, sparsity=0.1 → Reduced
+- `dvfs_complexity_heuristic_monotone`: higher surprise → same or higher compute mode (monotonicity)
+- `dvfs_n_active_experts_full/reduced/minimal`: Full=n_total, Reduced=n_total/2 (min 1), Minimal=1
+- `dvfs_stub_logs_without_panic`: 100 iterations with varying signals, no panic
+- `dvfs_log_bounded`: 1500 entries → capped at 1000
+- `dvfs_precision_bits_ordered`: Full(32) ≥ Reduced(16) ≥ Minimal(8)
+- `dvfs_log_avg_compute_level`: Minimal=0.0, Reduced=1.0, Full=2.0 average
+- `dvfs_dense_activation_triggers_full`: low surprise + dense (sparsity=0.01) → Full
+- `dvfs_cpufreq_stub_no_panic`: cpufreq functions handle NotFound/PermissionDenied gracefully
+- `dvfs_complexity_signal_clamping`: values clamped to [0.0, 1.0]
+
+### Key Insights
+- Dense activation (low sparsity) is a strong signal for Full compute, even with low surprise
+- Monotonicity property ensures predictable behavior: higher complexity → same or higher compute mode
+- Platform-specific code properly cfg-gated: Linux gets real sysfs access, others get stubs
+- DvfsLog bounded to prevent unbounded memory growth in long-running inference
+- Precision bits follow strict ordering: Full ≥ Reduced ≥ Minimal (32 ≥ 16 ≥ 8)
+
+### Issues Encountered
+- Initial test failure: `set_cpufreq_governor()` returned NotFound on systems without cpufreq
+  → FIX: Updated test to accept both Ok() and Err(NotFound) as valid outcomes
+- Unused import warning: `std::io::Error` not needed (only ErrorKind used)
+  → FIX: Removed unused import
+- Unused variable warning: loop counter `i` in `dvfs_log_bounded` test
+  → FIX: Changed to `_` (unused variable pattern)
