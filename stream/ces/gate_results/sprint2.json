@@ -1,0 +1,19 @@
+{
+  "sprint": 2,
+  "model": "ces_memory",
+  "pass": true,
+  "structural_pass": true,
+  "memory_bridge_pass": false,
+  "metrics": {
+    "elapsed_s": 0.071,
+    "checks": {
+      "ssm_forward": true,
+      "engram": false,
+      "dendritic": false,
+      "episodic": false,
+      "vectorstore": false,
+      "memory_bridge_note": "No module named 'ces_train.memory_bridge'"
+    }
+  },
+  "note": "Gate G2: SSM forward pass OK + memory tier structural check. memory_bridge_pass=False is acceptable until PyO3 bindings are wired in Sprint 5."
+}

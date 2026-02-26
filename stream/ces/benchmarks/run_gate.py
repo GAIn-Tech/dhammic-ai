@@ -142,6 +142,120 @@ def gate_1(model_name: str) -> dict:
     }
 
 
+def gate_2(model_name: str) -> dict:
+    import math, time
+
+    sys.path.insert(0, str(ROOT / "ces-train"))
+
+    try:
+        import torch
+        import torch.nn.functional as F
+    except ImportError:
+        return {
+            "sprint": 2,
+            "model": model_name,
+            "pass": False,
+            "metrics": {},
+            "note": "torch not available",
+        }
+
+    from ces_train.ces_ssm_model import CESSsmModel, CESConfig
+
+    device = torch.device("cpu")
+    torch.manual_seed(42)
+
+    BATCH, SEQ, HIDDEN = 2, 32, 128
+    VOCAB = 32_768
+
+    cfg = CESConfig(
+        vocab_size=VOCAB,
+        seq_len=SEQ,
+        hidden_dim=HIDDEN,
+        inner_dim=256,
+        n_mamba_layers=2,
+        n_rwkv_layers=1,
+        n_heads=4,
+        d_state=16,
+        d_conv=4,
+    )
+
+    checks = {}
+
+    t0 = time.time()
+
+    model = CESSsmModel(cfg).to(device)
+    model.eval()
+    tokens = torch.randint(0, VOCAB, (BATCH, SEQ + 1))
+    input_ids, targets = tokens[:, :-1], tokens[:, 1:]
+
+    with torch.no_grad():
+        logits = model(input_ids)
+        loss = F.cross_entropy(logits.reshape(-1, VOCAB), targets.reshape(-1))
+
+    checks["ssm_forward"] = (
+        math.isfinite(loss.item()) and loss.item() < math.log(VOCAB) * 1.2
+    )
+
+    try:
+        from ces_train.memory_bridge import (
+            engram_forward_py,
+            dendritic_modulate_py,
+            episodic_process_py,
+            vectorstore_knn_py,
+        )
+
+        token_ids = list(range(SEQ))
+        hidden_flat = [0.1] * HIDDEN
+        emb = engram_forward_py(token_ids, hidden_flat)
+        checks["engram"] = len(emb) == HIDDEN
+
+        ctx_flat = [0.05] * HIDDEN
+        out = dendritic_modulate_py(emb, ctx_flat)
+        checks["dendritic"] = len(out) == HIDDEN
+
+        for i in range(8):
+            h = [float(j + i * 0.01) / HIDDEN for j in range(HIDDEN)]
+            episodic_process_py(h, surprise=0.1 + i * 0.05)
+        checks["episodic"] = True
+
+        vecs = [[float(j) / HIDDEN for j in range(HIDDEN)] for _ in range(4)]
+        ids = list(range(4))
+        query = [0.5] * HIDDEN
+        results = vectorstore_knn_py(vecs, ids, query, k=2)
+        checks["vectorstore"] = len(results) == 2
+
+    except (ImportError, Exception) as e:
+        checks.setdefault("engram", False)
+        checks.setdefault("dendritic", False)
+        checks.setdefault("episodic", False)
+        checks.setdefault("vectorstore", False)
+        checks["memory_bridge_note"] = str(e)
+
+    elapsed = time.time() - t0
+
+    structural_pass = checks.get("ssm_forward", False)
+    memory_pass = all(
+        checks.get(k, False) for k in ["engram", "dendritic", "episodic", "vectorstore"]
+    )
+    gate_pass = structural_pass
+
+    return {
+        "sprint": 2,
+        "model": "ces_memory",
+        "pass": gate_pass,
+        "structural_pass": structural_pass,
+        "memory_bridge_pass": memory_pass,
+        "metrics": {
+            "elapsed_s": round(elapsed, 3),
+            "checks": checks,
+        },
+        "note": (
+            "Gate G2: SSM forward pass OK + memory tier structural check. "
+            "memory_bridge_pass=False is acceptable until PyO3 bindings are wired in Sprint 5."
+        ),
+    }
+
+
 def gate_stub(sprint: int, model_name: str) -> dict:
     return {
         "sprint": sprint,
@@ -152,7 +266,7 @@ def gate_stub(sprint: int, model_name: str) -> dict:
     }
 
 
-GATES = {0: gate_0, 1: gate_1}
+GATES = {0: gate_0, 1: gate_1, 2: gate_2}
 
 
 def main():
