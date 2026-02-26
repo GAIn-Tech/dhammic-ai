@@ -1,0 +1,16 @@
+[package]
+name = "ces-hebbian"
+version = "0.1.0"
+edition = "2021"
+description = "Hebbian LoRA forward-only adaptation engine"
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lib]
+name = "ces_hebbian"

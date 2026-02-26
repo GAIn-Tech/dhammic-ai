@@ -1151,7 +1151,7 @@ SPRINT 6:
 
 ---
 
-- [ ] 3.1. Hebbian LoRA Core **[RESEARCH]**
+- [x] 3.1. Hebbian LoRA Core **[RESEARCH]**
 
   **What to do**:
   - Implement `ces-hebbian` crate:
@@ -1204,7 +1204,7 @@ SPRINT 6:
 
 ---
 
-- [ ] 3.2. TreeLoRA / CL-LoRA Continual Learning Patterns **[RESEARCH]**
+- [x] 3.2. TreeLoRA / CL-LoRA Continual Learning Patterns **[RESEARCH]**
 
   **What to do**:
   - Enhance `ces-hebbian` with continual learning patterns:
