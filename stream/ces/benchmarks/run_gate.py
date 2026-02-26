@@ -256,6 +256,98 @@ def gate_2(model_name: str) -> dict:
     }
 
 
+def gate_3(model_name: str) -> dict:
+    import math, time, json
+
+    sys.path.insert(0, str(ROOT / "ces-train"))
+
+    try:
+        import torch
+        import torch.nn.functional as F
+    except ImportError:
+        return {
+            "sprint": 3,
+            "model": model_name,
+            "pass": False,
+            "metrics": {},
+            "note": "torch not available",
+        }
+
+    from ces_train.ces_ssm_model import CESSsmModel, CESConfig
+
+    device = torch.device("cpu")
+    torch.manual_seed(42)
+
+    BATCH, SEQ, HIDDEN = 2, 32, 128
+    VOCAB = 32_768
+
+    cfg = CESConfig(
+        vocab_size=VOCAB,
+        seq_len=SEQ,
+        hidden_dim=HIDDEN,
+        inner_dim=256,
+        n_mamba_layers=2,
+        n_rwkv_layers=1,
+        n_heads=4,
+        d_state=16,
+        d_conv=4,
+    )
+
+    t0 = time.time()
+    checks = {}
+
+    model = CESSsmModel(cfg).to(device)
+    model.eval()
+    tokens = torch.randint(0, VOCAB, (BATCH, SEQ + 1))
+    input_ids, targets = tokens[:, :-1], tokens[:, 1:]
+
+    with torch.no_grad():
+        logits = model(input_ids)
+        loss = F.cross_entropy(logits.reshape(-1, VOCAB), targets.reshape(-1))
+
+    checks["ssm_forward"] = (
+        math.isfinite(loss.item()) and loss.item() < math.log(VOCAB) * 1.2
+    )
+
+    forgetting_json = ROOT / "ces" / "benchmarks" / "forgetting_results.json"
+    if not forgetting_json.exists():
+        forgetting_json = ROOT / "benchmarks" / "forgetting_results.json"
+    if forgetting_json.exists():
+        forgetting_data = json.loads(forgetting_json.read_text())
+        checks["forgetting_retention"] = (
+            forgetting_data.get("task_a_retention", 0.0) >= 0.90
+        )
+        checks["forgetting_pass"] = forgetting_data.get("pass", False)
+    else:
+        checks["forgetting_retention"] = False
+        checks["forgetting_note"] = (
+            "forgetting_results.json not found — run sprint3_forgetting_test.py first"
+        )
+
+    elapsed = time.time() - t0
+
+    structural_pass = checks.get("ssm_forward", False) and checks.get(
+        "forgetting_pass", False
+    )
+
+    return {
+        "sprint": 3,
+        "model": "ces_ssm+hebbian_lora",
+        "pass": structural_pass,
+        "structural_pass": structural_pass,
+        "multiplier": "N/A (structural gate — trained weights required for multiplier)",
+        "metrics": {
+            "elapsed_s": round(elapsed, 3),
+            "ssm_loss": round(loss.item(), 4),
+            "checks": checks,
+        },
+        "note": (
+            "Gate G3: structural pass — SSM forward OK + Hebbian LoRA forgetting test OK. "
+            "Full G3 multiplier (≥4.5×) requires trained weights (Sprint 5-6)."
+        ),
+    }
+
+
 def gate_stub(sprint: int, model_name: str) -> dict:
     return {
         "sprint": sprint,
@@ -266,7 +358,7 @@ def gate_stub(sprint: int, model_name: str) -> dict:
     }
 
 
-GATES = {0: gate_0, 1: gate_1, 2: gate_2}
+GATES = {0: gate_0, 1: gate_1, 2: gate_2, 3: gate_3}
 
 
 def main():

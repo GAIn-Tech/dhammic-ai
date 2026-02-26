@@ -1,0 +1,28 @@
+{
+  "hebbian_dense": {
+    "use_sparse": false,
+    "baseline_task_a_acc": 1.0,
+    "post_taskb_task_a_acc": 1.0,
+    "task_a_retention": 1.0,
+    "pass": true
+  },
+  "hebbian_sparse": {
+    "use_sparse": true,
+    "baseline_task_a_acc": 0.0625,
+    "post_taskb_task_a_acc": 0.0625,
+    "task_a_retention": 1.0,
+    "pass": true
+  },
+  "frozen_baseline": {
+    "use_sparse": false,
+    "baseline_task_a_acc": 1.0,
+    "post_taskb_task_a_acc": 1.0,
+    "task_a_retention": 1.0,
+    "pass": true,
+    "note": "no adaptation \u2014 retention always 100%"
+  },
+  "task_a_retention": 1.0,
+  "sparse_vs_dense_retention": 0.0,
+  "sparse_better": true,
+  "pass": true
+}

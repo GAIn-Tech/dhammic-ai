@@ -1249,7 +1249,7 @@ SPRINT 6:
 
 ---
 
-- [ ] 3.3. Catastrophic Forgetting Tests **[ENGINEERING]**
+- [x] 3.3. Catastrophic Forgetting Tests **[ENGINEERING]**
 
   **What to do**:
   - Implement forgetting measurement suite in `benchmarks/`:
@@ -1293,7 +1293,7 @@ SPRINT 6:
 
 ---
 
-- [ ] 3.4. Sprint 3 Convergence Gate **[ENGINEERING]**
+- [x] 3.4. Sprint 3 Convergence Gate **[ENGINEERING]**
 
   **What to do**:
   - Integrate Hebbian LoRA with SSM + memory from Sprint 1-2

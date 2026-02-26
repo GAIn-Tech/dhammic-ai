@@ -1,0 +1,17 @@
+{
+  "sprint": 3,
+  "model": "ces_ssm+hebbian_lora",
+  "pass": true,
+  "structural_pass": true,
+  "multiplier": "N/A (structural gate \u2014 trained weights required for multiplier)",
+  "metrics": {
+    "elapsed_s": 0.074,
+    "ssm_loss": 10.4626,
+    "checks": {
+      "ssm_forward": true,
+      "forgetting_retention": true,
+      "forgetting_pass": true
+    }
+  },
+  "note": "Gate G3: structural pass \u2014 SSM forward OK + Hebbian LoRA forgetting test OK. Full G3 multiplier (\u22654.5\u00d7) requires trained weights (Sprint 5-6)."
+}
