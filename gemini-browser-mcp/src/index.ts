@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import * as path from 'node:path';
 import { logger } from './logger.js';
 import {
   getPage,
@@ -13,13 +14,25 @@ import {
 import { queryImage, iterateImage } from './gemini.js';
 import * as fs from 'node:fs/promises';
 
+const IMAGE_OUTPUT_BASE = '/tmp/gemini-images';
+
+/** Validate that a caller-supplied output path stays within IMAGE_OUTPUT_BASE. */
+function sanitizeOutputPath(input: string): string {
+  const resolved = path.resolve(input);
+  if (!resolved.startsWith(IMAGE_OUTPUT_BASE + path.sep) && resolved !== IMAGE_OUTPUT_BASE) {
+    throw new Error(
+      `output_path "${resolved}" is outside allowed directory "${IMAGE_OUTPUT_BASE}"`,
+    );
+  }
+  return resolved;
+}
+
 const server = new McpServer({ name: 'gemini-browser-mcp', version: '1.0.0' });
 
 // Prevent Chromium orphan processes when MCP host closes stdin
-process.stdin.on('end', async () => {
+process.stdin.on('end', () => {
   logger.info('stdin closed, shutting down');
-  await closeBrowser();
-  process.exit(0);
+  closeBrowser().finally(() => process.exit(0));
 });
 
 // ─── Tool 1: gemini_login ──────────────────────────────────────────────────
@@ -117,17 +130,18 @@ server.tool(
       });
 
       if (output_format === 'file') {
-        // Determine destination path
-        const destPath =
+        // Determine and validate destination path (must stay inside IMAGE_OUTPUT_BASE).
+        const rawDest =
           output_path ??
-          (result.filePath ?? `/tmp/gemini-images/output-${Date.now()}.webp`);
+          (result.filePath ?? `${IMAGE_OUTPUT_BASE}/output-${Date.now()}.webp`);
+        const destPath = sanitizeOutputPath(rawDest);
 
         if (result.filePath && result.filePath !== destPath) {
           // Move the already-written file if caller specified a different path
           await fs.rename(result.filePath, destPath).catch(async () => {
             // Cross-device move: copy then delete
             await fs.copyFile(result.filePath!, destPath);
-            await fs.unlink(result.filePath!);
+            await fs.unlink(result.filePath!).catch(() => {});
           });
         } else if (result.buffer) {
           await fs.writeFile(destPath, result.buffer);

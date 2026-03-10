@@ -27,15 +27,18 @@ vi.mock('playwright', () => ({
   },
 }));
 
-// Mock fs (used at module top-level by gemini.ts via mkdirSync)
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
-  return {
-    ...actual,
-    mkdirSync: vi.fn(),
-    writeFileSync: vi.fn(),
-  };
-});
+// Mock 'fs' (sync — used only for mkdirSync at module load)
+vi.mock('fs', () => ({
+  mkdirSync: vi.fn(),
+}));
+
+// Mock 'node:fs/promises' (async — used for writeFile in waitForImage)
+vi.mock('node:fs/promises', () => ({
+  writeFile: vi.fn().mockResolvedValue(undefined),
+  readdir: vi.fn().mockResolvedValue([]),
+  stat: vi.fn(),
+  unlink: vi.fn().mockResolvedValue(undefined),
+}));
 
 import {
   sanitizeProfileDir,
@@ -47,7 +50,7 @@ import {
   navigateToConversation,
 } from '../src/gemini.js';
 
-import { writeFileSync } from 'fs';
+import { writeFile } from 'node:fs/promises';
 
 // ---------------------------------------------------------------------------
 // Shared minimal mock Page
@@ -151,7 +154,7 @@ describe('image size routing via armImageCapture.waitForImage', () => {
 
     expect(result.filePath).toBeTruthy();
     expect(result.buffer).toBeNull();
-    expect(writeFileSync).toHaveBeenCalledWith(
+    expect(writeFile).toHaveBeenCalledWith(
       expect.stringContaining('/tmp/gemini-images/'),
       expect.any(Buffer),
     );
@@ -167,7 +170,7 @@ describe('image size routing via armImageCapture.waitForImage', () => {
 
     expect(result.buffer).toBeInstanceOf(Buffer);
     expect(result.filePath).toBeNull();
-    expect(writeFileSync).not.toHaveBeenCalled();
+    expect(writeFile).not.toHaveBeenCalled();
   });
 });
 

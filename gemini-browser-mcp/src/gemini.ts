@@ -1,4 +1,5 @@
-import { mkdirSync, writeFileSync } from 'fs';
+import { mkdirSync } from 'fs';
+import { writeFile, readdir, unlink, stat } from 'node:fs/promises';
 import { randomUUID } from 'crypto';
 import type { Page, Response } from 'playwright';
 import { logger } from './logger.js';
@@ -15,8 +16,25 @@ const SELECTORS = {
 
 const IMAGE_DIR = '/tmp/gemini-images';
 const LARGE_IMAGE_THRESHOLD = 400_000;
+const IMAGE_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
 
 mkdirSync(IMAGE_DIR, { recursive: true });
+
+/** Delete temp images older than IMAGE_MAX_AGE_MS (fire-and-forget). */
+export function pruneImageDir(): void {
+  const cutoff = Date.now() - IMAGE_MAX_AGE_MS;
+  readdir(IMAGE_DIR)
+    .then((files) =>
+      Promise.all(
+        files.map(async (f) => {
+          const fp = `${IMAGE_DIR}/${f}`;
+          const s = await stat(fp).catch(() => null);
+          if (s && s.mtimeMs < cutoff) await unlink(fp).catch(() => {});
+        }),
+      ),
+    )
+    .catch(() => {});
+}
 
 export interface ImageResult {
   buffer: Buffer | null;
@@ -139,8 +157,9 @@ async function waitForImage(
   if (buffer.byteLength > LARGE_IMAGE_THRESHOLD) {
     const ext = mimeType.includes('png') ? 'png' : mimeType.includes('jpeg') ? 'jpg' : 'webp';
     const filePath = `${IMAGE_DIR}/${randomUUID()}.${ext}`;
-    writeFileSync(filePath, buffer);
+    await writeFile(filePath, buffer);
     logger.info('Large image written to file', { filePath, bytes: buffer.byteLength });
+    pruneImageDir();
     return { buffer: null, filePath, mimeType, conversationId };
   }
 

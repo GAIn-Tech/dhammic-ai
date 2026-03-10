@@ -9,7 +9,6 @@ let context: BrowserContext | null = null;
 let initPromise: Promise<BrowserContext> | null = null;
 
 const BASE_PROFILE_DIR = path.join(os.homedir(), '.gemini-mcp');
-let _profileDir: string = path.join(BASE_PROFILE_DIR, 'profile');
 
 function sanitizeProfileDir(input?: string): string {
   const base = BASE_PROFILE_DIR;
@@ -24,6 +23,19 @@ function sanitizeProfileDir(input?: string): string {
   }
   return resolved;
 }
+
+// Honour GEMINI_MCP_PROFILE_DIR env var; fall back to default on invalid value.
+let _profileDir: string = (() => {
+  const envDir = process.env['GEMINI_MCP_PROFILE_DIR'];
+  if (envDir) {
+    try {
+      return sanitizeProfileDir(envDir);
+    } catch {
+      // Invalid env var — use default silently (logged at first browser init)
+    }
+  }
+  return path.join(BASE_PROFILE_DIR, 'profile');
+})();
 
 async function initBrowser(): Promise<BrowserContext> {
   logger.info('Initializing browser', { profileDir: _profileDir });
@@ -58,22 +70,30 @@ async function initBrowser(): Promise<BrowserContext> {
     });
   });
 
-  // Navigation allowlist — prevents prompt injection lateral movement
-  ctx.on('page', (page) => {
+  /** Attach navigation allowlist to a single page (main frame only). */
+  function attachAllowlist(page: import('playwright').Page): void {
     page.on('framenavigated', (frame) => {
+      // Only enforce on top-level navigations to avoid disrupting iframes.
+      if (frame !== frame.page().mainFrame()) return;
       const urlStr = frame.url();
       if (urlStr === 'about:blank' || urlStr.startsWith('chrome://')) return;
       try {
         const url = new URL(urlStr);
         const allowed = ['gemini.google.com', 'accounts.google.com'];
         if (!allowed.includes(url.hostname)) {
+          logger.warn('Navigation blocked by allowlist', { url: urlStr });
           frame.page().goBack().catch(() => {});
         }
       } catch {
         /* ignore invalid URLs */
       }
     });
-  });
+  }
+
+  // Cover the initial page that already exists before 'page' events fire.
+  for (const p of ctx.pages()) attachAllowlist(p);
+  // Cover future pages (e.g. pop-ups).
+  ctx.on('page', attachAllowlist);
 
   // Reset state when context is closed externally
   ctx.on('close', () => {
