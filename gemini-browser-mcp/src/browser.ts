@@ -37,12 +37,24 @@ let _profileDir: string = (() => {
   return path.join(BASE_PROFILE_DIR, 'profile');
 })();
 
+/** Returns true if the URL is permitted by the navigation allowlist. */
+export function isAllowedNavigation(urlStr: string): boolean {
+  if (urlStr === 'about:blank' || urlStr.startsWith('chrome://')) return true;
+  try {
+    const url = new URL(urlStr);
+    const allowed = ['gemini.google.com', 'accounts.google.com'];
+    return allowed.includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 async function initBrowser(): Promise<BrowserContext> {
   logger.info('Initializing browser', { profileDir: _profileDir });
 
   await fs.mkdir(_profileDir, { recursive: true, mode: 0o700 });
 
-  const browser = await chromium.launchPersistentContext(_profileDir, {
+  const ctx = await chromium.launchPersistentContext(_profileDir, {
     channel: 'chrome',
     headless: false,
     ignoreDefaultArgs: ['--enable-automation'],
@@ -59,8 +71,6 @@ async function initBrowser(): Promise<BrowserContext> {
     ],
   });
 
-  const ctx = browser;
-
   // Stealth init script
   await ctx.addInitScript(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -75,17 +85,9 @@ async function initBrowser(): Promise<BrowserContext> {
     page.on('framenavigated', (frame) => {
       // Only enforce on top-level navigations to avoid disrupting iframes.
       if (frame !== frame.page().mainFrame()) return;
-      const urlStr = frame.url();
-      if (urlStr === 'about:blank' || urlStr.startsWith('chrome://')) return;
-      try {
-        const url = new URL(urlStr);
-        const allowed = ['gemini.google.com', 'accounts.google.com'];
-        if (!allowed.includes(url.hostname)) {
-          logger.warn('Navigation blocked by allowlist', { url: urlStr });
-          frame.page().goBack().catch(() => {});
-        }
-      } catch {
-        /* ignore invalid URLs */
+      if (!isAllowedNavigation(frame.url())) {
+        logger.warn('Navigation blocked by allowlist', { url: frame.url() });
+        frame.page().goBack().catch(() => {});
       }
     });
   }
@@ -152,42 +154,29 @@ export async function withPage<T>(fn: (page: Page) => Promise<T>): Promise<T> {
 export async function closeBrowser(): Promise<void> {
   if (context) {
     logger.info('Closing browser context');
-    await context.close();
+    try {
+      await context.close();
+    } catch (e) {
+      logger.warn('Error closing browser context', e);
+    }
     context = null;
     initPromise = null;
   }
 }
+
+export const GEMINI_APP_URL = 'gemini.google.com/app';
 
 /** Read-only login check: inspects the current URL without navigating. */
 export async function checkLoginStatus(): Promise<boolean> {
   try {
     if (!context) return false;
     const page = await getPage();
-    return page.url().includes('gemini.google.com/app');
+    return page.url().includes(GEMINI_APP_URL);
   } catch {
     return false;
   }
 }
 
-/** Navigating login check: navigates to /app and verifies the redirect stays. */
-export async function isLoggedIn(): Promise<boolean> {
-  try {
-    const page = await getPage();
-    const url = page.url();
-    if (url.includes('gemini.google.com/app')) {
-      return true;
-    }
-    await page.goto('https://gemini.google.com/app', {
-      waitUntil: 'domcontentloaded',
-      timeout: 15000,
-    });
-    const finalUrl = page.url();
-    return finalUrl.includes('gemini.google.com/app');
-  } catch (e) {
-    logger.warn('isLoggedIn check failed', e);
-    return false;
-  }
-}
 
 export function getProfileDir(): string {
   return _profileDir;

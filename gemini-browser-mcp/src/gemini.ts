@@ -1,21 +1,32 @@
-import { mkdirSync } from 'fs';
+import { mkdirSync } from 'node:fs';
 import { writeFile, readdir, unlink, stat } from 'node:fs/promises';
-import { randomUUID } from 'crypto';
-import type { Page, Response } from 'playwright';
+import { randomUUID } from 'node:crypto';
+import * as path from 'node:path';
+import type { Page, Response, Locator } from 'playwright';
 import { logger } from './logger.js';
+import { GEMINI_APP_URL } from './browser.js';
 
 const SELECTORS = {
-  promptInput:
-    '[data-testid="user-prompt-input-box"], .input-area textarea, rich-textarea div[contenteditable], textarea',
-  submitButton:
-    'button[aria-label="Send message"], button[type="submit"], .send-button',
+  promptInput: [
+    '[data-testid="user-prompt-input-box"]',
+    '.input-area textarea',
+    'rich-textarea div[contenteditable]',
+    'textarea',
+  ] as const,
+  submitButton: [
+    'button[aria-label="Send message"]',
+    'button[type="submit"]',
+    '.send-button',
+  ] as const,
   generatedImage:
     'img[src*="generativelanguage.googleapis.com"], img[src*="blob:"], .response-container img',
   conversationUrlPattern: /gemini\.google\.com\/app\/([a-zA-Z0-9_-]+)/,
 } as const;
 
-const IMAGE_DIR = '/tmp/gemini-images';
-const LARGE_IMAGE_THRESHOLD = 400_000;
+export const IMAGE_DIR = '/tmp/gemini-images';
+export const CONVERSATION_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
+const DEFAULT_IMAGE_MIME_TYPE = 'image/webp';
+export const LARGE_IMAGE_THRESHOLD = 400_000;
 const IMAGE_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
 
 mkdirSync(IMAGE_DIR, { recursive: true });
@@ -27,13 +38,13 @@ export function pruneImageDir(): void {
     .then((files) =>
       Promise.all(
         files.map(async (f) => {
-          const fp = `${IMAGE_DIR}/${f}`;
+          const fp = path.join(IMAGE_DIR, f);
           const s = await stat(fp).catch(() => null);
           if (s && s.mtimeMs < cutoff) await unlink(fp).catch(() => {});
         }),
       ),
     )
-    .catch(() => {});
+    .catch((err) => { logger.warn('pruneImageDir failed', err); });
 }
 
 export interface ImageResult {
@@ -51,42 +62,40 @@ export async function ensureOnGemini(page: Page): Promise<void> {
   }
 }
 
-export async function fillPrompt(page: Page, prompt: string): Promise<void> {
-  const selectors = SELECTORS.promptInput.split(', ');
-  for (const selector of selectors) {
+/** Try each selector in order; return the first Locator that exists (count > 0). */
+async function findFirstLocator(
+  page: Page,
+  selectorList: readonly string[],
+): Promise<Locator | null> {
+  for (const selector of selectorList) {
     try {
       const locator = page.locator(selector).first();
-      const count = await locator.count();
-      if (count > 0) {
-        await locator.fill(prompt);
-        logger.debug('Filled prompt via selector', { selector });
-        return;
-      }
-    } catch {
-      // try next selector
+      if ((await locator.count()) > 0) return locator;
+    } catch (e) {
+      logger.debug('Selector evaluation failed, trying next', { selector, error: e instanceof Error ? e.message : String(e) });
     }
   }
-  // fallback: type into whatever is focused
+  return null;
+}
+
+export async function fillPrompt(page: Page, prompt: string): Promise<void> {
+  const locator = await findFirstLocator(page, SELECTORS.promptInput);
+  if (locator) {
+    await locator.fill(prompt);
+    logger.debug('Filled prompt via selector');
+    return;
+  }
   await page.keyboard.type(prompt);
   logger.debug('Filled prompt via keyboard.type fallback');
 }
 
 export async function submitPrompt(page: Page): Promise<void> {
-  const submitSelectors = SELECTORS.submitButton.split(', ');
-  for (const selector of submitSelectors) {
-    try {
-      const locator = page.locator(selector).first();
-      const count = await locator.count();
-      if (count > 0) {
-        await locator.click();
-        logger.debug('Submitted via button click', { selector });
-        return;
-      }
-    } catch {
-      // try next selector
-    }
+  const locator = await findFirstLocator(page, SELECTORS.submitButton);
+  if (locator) {
+    await locator.click();
+    logger.debug('Submitted via button click');
+    return;
   }
-  // fallback: press Enter
   await page.keyboard.press('Enter');
   logger.debug('Submitted via Enter key fallback');
 }
@@ -94,61 +103,42 @@ export async function submitPrompt(page: Page): Promise<void> {
 export function armImageCapture(
   page: Page,
 ): { waitForImage(timeoutMs: number): Promise<ImageResult> } {
-  // Register listener BEFORE submitting so we never miss a fast response
-  const responsePromise = page.waitForResponse(
-    (response: Response) => {
-      const url = response.url();
-      const contentType = response.headers()['content-type'] ?? '';
-      return (
-        url.includes('generativelanguage.googleapis.com') ||
-        contentType.startsWith('image/')
-      );
-    },
-  );
-
-  // DOM fallback locator (resolved lazily inside waitForImage)
   const imageFallbackLocator = page.locator(SELECTORS.generatedImage).first();
 
   return {
     async waitForImage(timeoutMs: number): Promise<ImageResult> {
-      return waitForImage(page, responsePromise, imageFallbackLocator, timeoutMs);
+      return waitForImage(page, imageFallbackLocator, timeoutMs);
     },
   };
 }
 
 async function waitForImage(
   page: Page,
-  responsePromise: Promise<Response>,
-  imageFallbackLocator: ReturnType<Page['locator']>,
+  imageFallbackLocator: Locator,
   timeoutMs: number,
 ): Promise<ImageResult> {
-  const conversationId = extractConversationId(page);
-
   let response: Response;
   try {
-    response = await Promise.race([
-      responsePromise,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Image response timeout')), timeoutMs),
-      ),
-    ]);
+    response = await page.waitForResponse(
+      (r: Response) => {
+        const contentType = r.headers()['content-type'] ?? '';
+        return contentType.startsWith('image/');
+      },
+      { timeout: timeoutMs },
+    );
   } catch (err) {
+    // timeout or no response — fall back to DOM
     logger.warn('Network response not captured, falling back to DOM image', { err });
-
-    // DOM fallback: wait for an img element to appear
     await imageFallbackLocator.waitFor({ state: 'visible', timeout: timeoutMs });
     const src = await imageFallbackLocator.getAttribute('src');
     logger.info('DOM fallback image located', { src: src?.slice(0, 80) });
-
-    return {
-      buffer: null,
-      filePath: null,
-      mimeType: 'image/webp',
-      conversationId,
-    };
+    const conversationId = extractConversationId(page);
+    return { buffer: null, filePath: null, mimeType: DEFAULT_IMAGE_MIME_TYPE, conversationId };
   }
 
-  const mimeType = response.headers()['content-type'] ?? 'image/webp';
+  const conversationId = extractConversationId(page);
+  const rawContentType = response.headers()['content-type'] ?? DEFAULT_IMAGE_MIME_TYPE;
+  const mimeType = (rawContentType.split(';')[0] ?? DEFAULT_IMAGE_MIME_TYPE).trim();
   const bodyBuffer = await response.body();
   const buffer = Buffer.from(bodyBuffer);
 
@@ -156,7 +146,7 @@ async function waitForImage(
 
   if (buffer.byteLength > LARGE_IMAGE_THRESHOLD) {
     const ext = mimeType.includes('png') ? 'png' : mimeType.includes('jpeg') ? 'jpg' : 'webp';
-    const filePath = `${IMAGE_DIR}/${randomUUID()}.${ext}`;
+    const filePath = path.join(IMAGE_DIR, randomUUID() + '.' + ext);
     await writeFile(filePath, buffer);
     logger.info('Large image written to file', { filePath, bytes: buffer.byteLength });
     pruneImageDir();
@@ -172,14 +162,14 @@ export function extractConversationId(page: Page): string {
   if (match?.[1]) {
     return match[1];
   }
-  return `fallback-${Date.now()}`;
+  return `fallback-${randomUUID()}`;
 }
 
 export async function navigateToConversation(
   page: Page,
   conversationId: string,
 ): Promise<void> {
-  if (!/^[a-zA-Z0-9_-]+$/.test(conversationId)) {
+  if (!CONVERSATION_ID_REGEX.test(conversationId)) {
     throw new Error(`Invalid conversationId: ${conversationId}`);
   }
   const url = `https://gemini.google.com/app/${conversationId}`;
@@ -212,4 +202,20 @@ export async function iterateImage(
   await fillPrompt(page, prompt);
   await submitPrompt(page);
   return capture.waitForImage(timeoutMs);
+}
+
+/**
+ * Poll the page URL until it contains GEMINI_APP_URL (login confirmed) or
+ * the deadline is reached. Returns true if login was detected, false on timeout.
+ */
+export async function waitForLogin(page: Page, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  const pollIntervalMs = 2000;
+  while (Date.now() < deadline) {
+    if (page.url().includes(GEMINI_APP_URL)) {
+      return true;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+  return false;
 }

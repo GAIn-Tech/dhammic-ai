@@ -60,8 +60,10 @@ export function createLogger(minLevel: LogLevel): Logger {
 
 const envLevel = process.env['LOG_LEVEL'] ?? 'info';
 const validLevel: LogLevel =
-  (LOG_LEVELS as Record<string, number>)[envLevel] !== undefined
-    ? (envLevel as LogLevel)
-    : 'info';
+  envLevel in LOG_LEVELS ? (envLevel as LogLevel) : 'info';
+
+if (envLevel !== validLevel) {
+  process.stderr.write(JSON.stringify({ level: 'warn', message: `Invalid LOG_LEVEL "${envLevel}", falling back to "info"`, timestamp: new Date().toISOString() }) + '\n');
+}
 
 export const logger: Logger = createLogger(validLevel);
