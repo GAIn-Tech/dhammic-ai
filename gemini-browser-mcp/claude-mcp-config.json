@@ -1,0 +1,20 @@
+{
+  "_comment": "Add this to your Claude Desktop or Claude Code MCP configuration",
+  "mcpServers": {
+    "gemini-browser": {
+      "command": "node",
+      "args": ["/home/mikeb/gemini-browser-mcp/dist/index.js"],
+      "env": {
+        "GEMINI_MCP_PROFILE_DIR": "/home/mikeb/.gemini-mcp/profile",
+        "GEMINI_MCP_HEADLESS": "true",
+        "LOG_LEVEL": "info"
+      }
+    }
+  },
+  "_setup_instructions": [
+    "1. Build: cd /home/mikeb/gemini-browser-mcp && bun install && bun run build",
+    "2. Install Chrome: npx playwright install chrome",
+    "3. First login (headed): Call gemini_login tool from Claude",
+    "4. After login, all tools work headlessly using saved session"
+  ]
+}

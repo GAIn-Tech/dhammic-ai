@@ -1,0 +1,14 @@
+node_modules/
+dist/
+profile/
+*.json.bak
+session.json
+auth*.json
+
+# Allow specific JSON files
+!package.json
+!tsconfig.json
+!claude-mcp-config.json
+
+# Temp images
+/tmp/gemini-images/
