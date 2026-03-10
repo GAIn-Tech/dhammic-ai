@@ -123,10 +123,30 @@ async function ensureContext(): Promise<BrowserContext> {
 export async function getPage(): Promise<Page> {
   const ctx = await ensureContext();
   const pages = ctx.pages();
-  if (pages.length > 0) {
-    return pages[0]!;
-  }
+  const page = pages[0];
+  if (page) return page;
   return ctx.newPage();
+}
+
+// ─── Serialization gate ────────────────────────────────────────────────────
+// Gemini's web UI is stateful — concurrent tool calls on the same page would
+// interleave DOM operations and corrupt prompt/response state. Serialise all
+// page-mutating operations through this lock.
+let _pageBusy = false;
+
+export async function withPage<T>(fn: (page: Page) => Promise<T>): Promise<T> {
+  if (_pageBusy) {
+    throw new Error(
+      'A Gemini operation is already in progress. Wait for it to complete before retrying.',
+    );
+  }
+  _pageBusy = true;
+  try {
+    const page = await getPage();
+    return await fn(page);
+  } finally {
+    _pageBusy = false;
+  }
 }
 
 export async function closeBrowser(): Promise<void> {
@@ -138,6 +158,18 @@ export async function closeBrowser(): Promise<void> {
   }
 }
 
+/** Read-only login check: inspects the current URL without navigating. */
+export async function checkLoginStatus(): Promise<boolean> {
+  try {
+    if (!context) return false;
+    const page = await getPage();
+    return page.url().includes('gemini.google.com/app');
+  } catch {
+    return false;
+  }
+}
+
+/** Navigating login check: navigates to /app and verifies the redirect stays. */
 export async function isLoggedIn(): Promise<boolean> {
   try {
     const page = await getPage();

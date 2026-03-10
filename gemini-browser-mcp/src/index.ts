@@ -5,8 +5,10 @@ import * as path from 'node:path';
 import { logger } from './logger.js';
 import {
   getPage,
+  withPage,
   closeBrowser,
   isLoggedIn,
+  checkLoginStatus,
   isBrowserRunning,
   getProfileDir,
   setProfileDir,
@@ -115,8 +117,7 @@ server.tool(
   },
   async ({ prompt, wait_timeout_ms, output_format, output_path }) => {
     try {
-      const page = await getPage();
-      const result = await queryImage(page, prompt, wait_timeout_ms);
+      const result = await withPage((page) => queryImage(page, prompt, wait_timeout_ms));
 
       const content: Array<
         | { type: 'text'; text: string }
@@ -156,8 +157,9 @@ server.tool(
             mimeType: result.mimeType,
           });
         } else if (result.filePath) {
-          // Large image was written to disk; read it back as base64
+          // Large image was written to disk; read it back as base64, then delete
           const buf = await fs.readFile(result.filePath);
+          fs.unlink(result.filePath).catch(() => {}); // fire-and-forget cleanup
           content.push({
             type: 'image' as const,
             data: buf.toString('base64'),
@@ -204,8 +206,9 @@ server.tool(
   },
   async ({ conversation_id, refinement_prompt, wait_timeout_ms }) => {
     try {
-      const page = await getPage();
-      const result = await iterateImage(page, conversation_id, refinement_prompt, wait_timeout_ms);
+      const result = await withPage((page) =>
+        iterateImage(page, conversation_id, refinement_prompt, wait_timeout_ms),
+      );
 
       const content: Array<
         | { type: 'text'; text: string }
@@ -225,6 +228,7 @@ server.tool(
         });
       } else if (result.filePath) {
         const buf = await fs.readFile(result.filePath);
+        fs.unlink(result.filePath).catch(() => {}); // fire-and-forget cleanup
         content.push({
           type: 'image' as const,
           data: buf.toString('base64'),
@@ -269,7 +273,9 @@ server.tool(
         }
       }
 
-      const loggedIn = browserRunning ? await isLoggedIn() : false;
+      // Use read-only status check — avoids triggering a page navigation that
+      // could abort an in-flight image generation.
+      const loggedIn = browserRunning ? await checkLoginStatus() : false;
 
       return {
         content: [
@@ -277,7 +283,7 @@ server.tool(
             type: 'text' as const,
             text: JSON.stringify({
               is_logged_in: loggedIn,
-              profile_dir: getProfileDir(),
+              profile_dir: path.basename(getProfileDir()),
               browser_running: browserRunning,
               current_url: currentUrl,
             }),

@@ -58,7 +58,10 @@ export function createLogger(minLevel: LogLevel): Logger {
   };
 }
 
-const envLevel = (process.env['LOG_LEVEL'] ?? 'info') as LogLevel;
-const validLevel: LogLevel = LOG_LEVELS[envLevel] !== undefined ? envLevel : 'info';
+const envLevel = process.env['LOG_LEVEL'] ?? 'info';
+const validLevel: LogLevel =
+  (LOG_LEVELS as Record<string, number>)[envLevel] !== undefined
+    ? (envLevel as LogLevel)
+    : 'info';
 
 export const logger: Logger = createLogger(validLevel);
