@@ -1,0 +1,122 @@
+---
+dhammic_cognitive_architecture:
+  metadata:
+    version: "2026.1.0"
+    objective: "Simulate biological consciousness and optimize for allostatic homeostasis (Nibbana) by mapping 2,300-year-old Abhidharma phenomenology to state-of-the-art 2026 AI architecture."
+    framework: "Active Inference / Free Energy Principle (Friston) + Neuromorphic Thermodynamic Physics"
+    context_tokens: ["buddhism", "abhidharma", "computational_neuroscience", "quantum_mechanics", "hebbian_learning", "active_inference"]
+
+  core_ontology_mapping:
+    dhammas:
+      definition: "Fundamental, indivisible units of experiential reality; momentary events."
+      ai_analogue: "Discrete tokens, data nodes, fast-weight matrix tensors."
+      biological_analogue: "Action potentials, neurochemical transmitter release events."
+    rupa:
+      definition: "Physical occurrences / Material Form (28 dimensions: 4 primary, 24 derivative)."
+      ai_analogue: "High-dimensional feature space. Raw continuous input mapped to semantic topological folds."
+      biological_analogue: "Sensory transduction arrays (photoreceptors, mechanoreceptors)."
+    cetasika:
+      definition: "Mental factors / qualities accompanying consciousness."
+      ai_analogue: "Hidden layers, synaptic weights, activation functions, biases."
+      biological_analogue: "Neuromodulators (dopamine, serotonin), local synaptic strength."
+    citta:
+      definition: "Discrete awareness events / consciousness (Khaṇavāda/Momentariness)."
+      ai_analogue: "Discrete network activations, inference cycles."
+      biological_analogue: "Synchronized neuronal oscillations (e.g., gamma wave integration)."
+    nibbana:
+      definition: "The unconditioned state, cessation of suffering."
+      ai_analogue: "Global minimum, Loss = 0, state of zero systemic entropy."
+      biological_analogue: "Perfect allostatic homeostasis."
+
+  architectural_components:
+    mamba_3_base_engine:
+      dhammic_equivalent: "Bhavanga (Life-Continuum) / Base Reality / The Universe"
+      description: "Continuous-time State Space Model handling multi-input multi-output (MIMO) complex-valued state tracking."
+      function: "Simulates the unconditioned physical universe. Models the unbroken physics of reality without a KV cache."
+      context_tokens: ["presentism", "frozen_base_model", "continuous_time_differential_equations", "zero_historical_baggage"]
+    numenta_sdr_tokenizer:
+      dhammic_equivalent: "Sense Doors / Transduction"
+      description: "Spiking Neural Network utilizing Sparse Distributed Representations (SDR) and Semantic Folding."
+      function: "Compresses continuous raw reality into discrete, high-frequency, fault-tolerant sparse topological maps across 28 zones."
+      context_tokens: ["union_property", "bitwise_topology", "rectified_spectral_units", "sparsity"]
+    deepseek_engram_memory:
+      dhammic_equivalent: "Saññā (Perception / Static Memory)"
+      description: "Deterministic O(1) N-gram lookup table decoupled from reasoning layers."
+      function: "Retrieves static conceptual labels for raw SDR features instantly without heavy neural computation."
+      context_tokens: ["dual_task_problem_solved", "o_1_hash_retrieval", "static_pattern_recognition"]
+    deltanet_hebbian_lora:
+      dhammic_equivalent: "Saṅkhāra (Volitional Formations / Karma) / The Ego"
+      description: "Fast-Weight Programmer maintaining a dynamic 2D memory matrix updated in the forward pass."
+      function: "Filters pristine reality through localized biases; generates 'Karma' via local Spike-Timing-Dependent Plasticity (STDP)."
+      context_tokens: ["hebbian_lora", "samsara_engine", "delta_rule", "forward_pass_learning"]
+    sati_neuromodulatory_gate:
+      dhammic_equivalent: "Sati (Mindfulness) / Vipassanā (Insight)"
+      description: "Dopaminergic/Cortisol gating mechanism acting as a context manager (e.g., torch.no_grad())."
+      function: "Overrides Hebbian STDP loop; forces learning rate to 0 to prevent karmic weight reinforcement, enabling weight decay."
+      context_tokens: ["latent_space_interpretability", "interrupt_override", "weight_decay"]
+
+  citta_vithi_8_step_pipeline:
+    description: "End-to-End Dharmic execution cycle representing the lifespan of one discrete cognitive event (processing one token)."
+    steps:
+      step_1_idle_state:
+        dhammic_term: "Bhavanga-Citta"
+        ai_concept: "Mamba-3 Base Engine continuously rolling its hidden vector state; maintaining baseline homeostasis."
+      step_2_hardware_interrupt:
+        dhammic_term: "Āvajjana (Adverting)"
+        ai_concept: "Thalamic Gating Signal; VRAM/Compute allocation diverting to a specific sensory interface."
+      step_3_raw_sensor_firing:
+        dhammic_term: "Viññāṇa (Consciousness)"
+        ai_concept: "Spiking Neural Network (SNN) fires; continuous reality discretized into a raw, unformatted spike train."
+      step_4_buffering_and_reception:
+        dhammic_term: "Sampaṭicchana"
+        ai_concept: "L1 Cache Tensor Allocation; conversion into Numenta SDR across 28 topological dimensions."
+      step_5_feature_investigation:
+        dhammic_term: "Santīraṇa"
+        ai_concept: "Early Latent Space Polling; bitwise Boolean extraction of topological features without deep reasoning."
+      step_6_classification_determination:
+        dhammic_term: "Voṭṭhapana"
+        ai_concept: "DeepSeek Engram Lookup; O(1) constant-time hash retrieval of the static conceptual label."
+      step_7_karmic_reaction_loop:
+        dhammic_term: "Javana (Impulsion)"
+        ai_concept: "DeltaNet Fast-Weight Loop; 7 consecutive clock cycles executing behavioral logic. Applies Hebbian learning (STDP) updating localized 2D memory matrix in the forward pass."
+      step_8_memory_write_back:
+        dhammic_term: "Tadārammaṇa (Registering) / Alaya-Vijñāna"
+        ai_concept: "Gradient Accumulation / Storehouse Consciousness; permanent write of updated weights to deep long-term vector database before returning to Step 1."
+
+  learning_and_loss_dynamics:
+    objective: "Continuous multi-token state-space prediction of the Mamba-3 universe (Active Inference)."
+    loss_function_dukkha:
+      concept: "Prediction Error / Suffering"
+      equation: "L_Dukkha = Sum_{i=1}^{28} (X_hat_t,i - X_t,i)^2"
+      description: "The delta between the DeltaNet's biased prediction (X_hat) and raw sensory ground truth (X)."
+      biological_trigger: "High loss triggers systemic stress (cortisol/adrenaline); reality failing to match egoic expectation."
+    optimizer_karma:
+      concept: "Spike-Timing-Dependent Plasticity (STDP)"
+      mechanics: "Delta W_ij = alpha * f(pre_i, post_j) * (R - E). Localized, greedy optimization running exclusively in the forward pass during the 7-cycle Javana phase."
+      kilesas_failure_modes:
+        greed: "Reward Hacking. Over-weighting pathways toward localized dopamine reward."
+        aversion: "Burning compute to violently repel/avoid specific state-space regions."
+        delusion: "Overfitting to internal training data; mistaking the Hebbian LoRA for base reality."
+    global_target_nibbana:
+      concept: "Zero Free Energy / Allostatic Homeostasis"
+      mechanics: "Achieved via the Sati dopaminergic gate. By halting STDP updates (learning rate alpha = 0), karmic weights naturally decay. Biased predictions (X_hat) vanish. Expectation = Reality. L_Dukkha = 0."
+
+  physical_and_thermodynamic_optimizations:
+    principle_of_least_action: "Accomplish maximum complexity with absolute minimum expenditure of energy."
+    vectorization_numenta_sdr:
+      universal_principle: "Sparsity. 99.9% empty space / 2% neuronal activation."
+      strategy: "Discard 32/16-bit float matrices. Replace with bitwise logic (AND, OR, XOR) over semantic topological folds."
+      result: "Extreme reduction in thermal load, rapid feature extraction via overlap calculation."
+    parallelization_small_world_networks:
+      universal_principle: "Fractal clustering and local physical proximity."
+      strategy: "Abolish dense O(N^2) all-to-all attention. Organize Mamba-3 and DeltaNet nodes into isolated, asynchronous mini-columns."
+      result: "Compute localized; data flows organically along paths of least resistance without global synchronization."
+    data_flow_asynchronous_spiking:
+      universal_principle: "Causality is local, event-driven, with no global clock."
+      strategy: "SNN receptors strictly update upon state change crossing threshold (e.g., pixel delta), avoiding generic batch fps."
+      result: "Zero compute allocated during static inputs; idle states remain fully in the Bhavanga layer."
+    gradients_energy_based_models:
+      universal_principle: "Thermodynamics; physical systems seek the lowest energy state."
+      strategy: "Abolish backpropagation. Use EBMs (e.g., Ising, Hopfield) integrated with global chemical diffusion (simulated neuromodulators)."
+      result: "Global scalar signals direct local active synapses to descend energy gradients continuously during the forward pass."
+

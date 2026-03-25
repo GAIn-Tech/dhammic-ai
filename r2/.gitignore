@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pstats
+.coverage
+.pytest_cache/
+.ruff_cache/
+.letta/
+.claude/
+.tmp_*
+artifacts_profiler_traces/
+artifacts_*.pstats
+artifacts_*.json
