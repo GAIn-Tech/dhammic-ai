@@ -1,0 +1,88 @@
+[
+  {
+    "name": "g2_elite_d192_exp3",
+    "overrides": {
+      "d_model": 192,
+      "n_layers": 6,
+      "mamba_expand": 3
+    }
+  },
+  {
+    "name": "g2_d192_exp3_lora32",
+    "overrides": {
+      "d_model": 192,
+      "n_layers": 6,
+      "mamba_expand": 3,
+      "lora_rank": 32
+    }
+  },
+  {
+    "name": "g2_d192_exp3_lr1e2",
+    "overrides": {
+      "d_model": 192,
+      "n_layers": 6,
+      "mamba_expand": 3,
+      "lr": 0.01
+    }
+  },
+  {
+    "name": "g2_d192_exp3_lr5e2",
+    "overrides": {
+      "d_model": 192,
+      "n_layers": 6,
+      "mamba_expand": 3,
+      "lr": 0.05
+    }
+  },
+  {
+    "name": "g2_d192_exp3_l4",
+    "overrides": {
+      "d_model": 192,
+      "n_layers": 4,
+      "mamba_expand": 3
+    }
+  },
+  {
+    "name": "g2_d192_exp3_l8",
+    "overrides": {
+      "d_model": 192,
+      "n_layers": 8,
+      "mamba_expand": 3
+    }
+  },
+  {
+    "name": "g2_d160_exp3_l6",
+    "overrides": {
+      "d_model": 160,
+      "n_layers": 6,
+      "mamba_expand": 3
+    }
+  },
+  {
+    "name": "g2_d224_exp3_l6",
+    "overrides": {
+      "d_model": 224,
+      "n_layers": 6,
+      "mamba_expand": 3
+    }
+  },
+  {
+    "name": "g2_d192_exp3_sdr4k",
+    "overrides": {
+      "d_model": 192,
+      "n_layers": 6,
+      "mamba_expand": 3,
+      "sdr_dim": 4096,
+      "sdr_k_active": 80
+    }
+  },
+  {
+    "name": "g2_d128_exp3_l4",
+    "overrides": {
+      "d_model": 128,
+      "n_layers": 4,
+      "mamba_expand": 3,
+      "lr": 0.01
+    }
+  }
+]

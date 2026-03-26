@@ -1,0 +1,15 @@
+{
+  "gen_id": 2,
+  "jobs": {
+    "g2_elite_d192_exp3": "69c4894b71691dc46f1669be",
+    "g2_d192_exp3_lora32": "69c4894b25abd6f920b4f261",
+    "g2_d192_exp3_lr1e2": "69c4894c25abd6f920b4f263",
+    "g2_d192_exp3_lr5e2": "69c4894c71691dc46f1669c0",
+    "g2_d192_exp3_l4": "69c4894d71691dc46f1669c2",
+    "g2_d192_exp3_l8": "69c4894d25abd6f920b4f265",
+    "g2_d160_exp3_l6": "69c4894d25abd6f920b4f267",
+    "g2_d224_exp3_l6": "69c4894e25abd6f920b4f269",
+    "g2_d192_exp3_sdr4k": "69c4894e71691dc46f1669c4",
+    "g2_d128_exp3_l4": "69c4894f25abd6f920b4f26b"
+  }
+}

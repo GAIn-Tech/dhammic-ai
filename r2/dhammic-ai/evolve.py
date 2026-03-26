@@ -244,6 +244,7 @@ def launch_generation(gen_id: int):
 
     print(f"[evolve] Launching Gen {gen_id}: {len(mutations)} mutations on {FLAVOR}")
     token = get_token()
+    api = HfApi(token=token)
     job_ids = {}
 
     for m in mutations:

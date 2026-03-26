@@ -1,0 +1,16 @@
+{
+  "gen_id": 6,
+  "jobs": {
+    "g6_d128_l4_lr5e3": "69c4c16a71691dc46f1673ba",
+    "g6_d128_l4_lr2e2": "69c4c16b71691dc46f1673bc",
+    "g6_d128_l6_lr1e2": "69c4c16b71691dc46f1673be",
+    "g6_d192_l4_lr5e3": "69c4c16b25abd6f920b4fb37",
+    "g6_d192_l4_lr2e2": "69c4c16c71691dc46f1673c0",
+    "g6_d192_l6_lr1e2": "69c4c16c71691dc46f1673c2",
+    "g6_d160_l4_lr1e2": "69c4c16d71691dc46f1673c4",
+    "g6_d256_l4_lr1e2": "69c4c16d25abd6f920b4fb39",
+    "g6_d128_l4_eng4k": "69c4c16d25abd6f920b4fb3b",
+    "g6_d192_l4_h16": "69c4c16e25abd6f920b4fb3d"
+  },
+  "launched": 1774502254.1730537
+}

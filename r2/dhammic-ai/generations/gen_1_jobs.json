@@ -1,0 +1,16 @@
+{
+  "gen_id": 1,
+  "jobs": {
+    "baseline": "69c4750571691dc46f16684b",
+    "wide_d256_l4": "69c4750625abd6f920b4f15c",
+    "deep_d128_l8": "69c4750771691dc46f16684d",
+    "big_sdr": "69c4750925abd6f920b4f15e",
+    "dense_engram": "69c4750a71691dc46f16684f",
+    "high_lr": "69c4750c71691dc46f166851",
+    "wide_expand3": "69c4750d71691dc46f166854",
+    "many_heads": "69c4750e25abd6f920b4f160",
+    "big_lora": "69c4751025abd6f920b4f162",
+    "max_throughput": "69c4751125abd6f920b4f164"
+  },
+  "launched": 1774482705.6026857
+}

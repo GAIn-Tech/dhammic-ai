@@ -1,0 +1,16 @@
+{
+  "gen_id": 8,
+  "jobs": {
+    "g7_d128_l4_lr1.5e2_elite": "ERROR: name 'api' is not defined",
+    "g7_d160_l4_lr1.5e2_elite": "ERROR: name 'api' is not defined",
+    "g7_d192_l4_lr1.5e2_elite": "ERROR: name 'api' is not defined",
+    "g7_d128_l4_lr1.5e2+g7_d160_l4_lr1.5e2": "ERROR: name 'api' is not defined",
+    "g7_d128_l4_lr1.5e2+g7_d192_l4_lr1.5e2": "ERROR: name 'api' is not defined",
+    "g7_d128_l4_lr1.5e2+g7_d176_l4_lr1.5e2": "ERROR: name 'api' is not defined",
+    "g7_d128_l4_lr1.5e2+g7_d160_l4_eng4k": "ERROR: name 'api' is not defined",
+    "g7_d128_l4_lr1.5e2+g7_d160_l4_ds32": "ERROR: name 'api' is not defined",
+    "g7_d128_l4_lr1.5e2+g7_d160_l4_sdr4k": "ERROR: name 'api' is not defined",
+    "g7_d128_l4_lr1.5e2+g7_d160_l4_lr8e3": "ERROR: name 'api' is not defined"
+  },
+  "launched": 1774503541.679969
+}

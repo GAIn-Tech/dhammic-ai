@@ -1,0 +1,15 @@
+{
+  "gen_id": 4,
+  "jobs": {
+    "g4_d192_l4_lr1e2": "69c48dbb25abd6f920b4f2f0",
+    "g4_d192_l4_lr3e2": "69c48dbb71691dc46f166a5e",
+    "g4_d192_l4_sdr4k": "69c48dbc71691dc46f166a60",
+    "g4_d160_l6_lr1e2": "69c48dbc25abd6f920b4f2f2",
+    "g4_d160_l6_lr3e2": "69c48dbc71691dc46f166a62",
+    "g4_d176_l5_exp3": "69c48dbd25abd6f920b4f2f4",
+    "g4_d192_l4_lora32": "69c48dbd71691dc46f166a64",
+    "g4_d192_l4_b64": "69c48dbe71691dc46f166a66",
+    "g4_d224_l4_exp3": "69c48dbe71691dc46f166a68",
+    "g4_d160_l8_exp3": "69c48dbe25abd6f920b4f2f6"
+  }
+}

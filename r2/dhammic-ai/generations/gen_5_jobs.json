@@ -1,0 +1,8 @@
+{
+  "gen_id": 5,
+  "jobs": {
+    "pretrain_champion_10k": "69c495cf71691dc46f166ad4",
+    "pretrain_champion_20k": "69c495cf25abd6f920b4f326",
+    "pretrain_d192_10k": "69c495d025abd6f920b4f328"
+  }
+}

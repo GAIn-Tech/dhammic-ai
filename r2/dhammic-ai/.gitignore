@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Dependencies (use uv.lock instead)
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test/Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Profiling artifacts (generated, can be re-created)
+artifacts_profiler_traces/
+*.pstats
+
+# Logs
+*.log
+/tmp/
+
+# KEEP these:
+# .claude/        — project instructions
+# generations/    — evolution history
+# jobs/           — job scripts
+# docs/           — documentation
+# src/            — source code
+# tests/          — test suites
+# *.pt *.ckpt     — checkpoints (tracked via LFS)
