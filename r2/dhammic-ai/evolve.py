@@ -384,11 +384,13 @@ def select_and_crossover(gen_id: int):
 
     # Crossover: pairwise + elites
     # Extract ONLY params that differ from DhammicConfig defaults (the actual mutations)
-    from dataclasses import fields as dc_fields
+    from dataclasses import fields as dc_fields, MISSING
     try:
         from train import DhammicConfig
-        default_cfg = {f.name: f.default for f in dc_fields(DhammicConfig)
-                       if f.default is not f.default_factory if hasattr(f, 'default_factory') else True}
+        default_cfg = {}
+        for f in dc_fields(DhammicConfig):
+            if f.default is not MISSING:
+                default_cfg[f.name] = f.default
     except Exception:
         default_cfg = {}
 
@@ -416,16 +418,24 @@ def select_and_crossover(gen_id: int):
         cfg = extract_overrides(w)
         crossovers.append({"name": f"{w['mutation']}_elite", "overrides": cfg})
 
-    # Pairwise crossover — merge actual overrides from both parents
+    # Pairwise crossover — take architecture from w1, training/memory from w2
+    ARCH_KEYS = ("d_model", "n_layers", "mamba_expand", "n_heads", "d_state")
+    MEMORY_KEYS = ("sdr_dim", "sdr_k_active", "engram_n_columns", "engram_cells_per_col",
+                   "engram_k_active", "engram_layer", "lora_rank")
+    TRAIN_KEYS = ("lr",)
+
     for i, w1 in enumerate(winners):
         for w2 in winners[i + 1:]:
             o1 = extract_overrides(w1)
             o2 = extract_overrides(w2)
-            # w1 provides base, w2 provides non-overlapping overrides
-            merged = {**o1}
-            for k, v in o2.items():
-                if k not in merged:
-                    merged[k] = v
+            # Architecture from w1, memory/training from w2
+            merged = {}
+            for k in ARCH_KEYS:
+                if k in o1: merged[k] = o1[k]
+                elif k in o2: merged[k] = o2[k]
+            for k in (*MEMORY_KEYS, *TRAIN_KEYS):
+                if k in o2: merged[k] = o2[k]
+                elif k in o1: merged[k] = o1[k]
             crossovers.append({"name": f"{w1['mutation']}+{w2['mutation']}", "overrides": merged})
 
     crossovers = crossovers[:10]
