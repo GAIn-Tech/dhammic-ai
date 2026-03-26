@@ -48,16 +48,14 @@ GENERATION_1 = [
 JOB_TEMPLATE = '''# /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "torch==2.6.0",
-#     "pytorch-lightning>=2.6.0",
-#     "tiktoken>=0.11.0",
-#     "rustbpe>=0.1.0",
-#     "requests>=2.32",
-#     "pyarrow>=18.0",
-#     "huggingface-hub>=0.35.0",
-#     "datasets>=3.0",
-#     "einops>=0.8.0",
-#     "tensorboard>=2.18",
+#     "torch",
+#     "pytorch-lightning",
+#     "tiktoken",
+#     "requests",
+#     "pyarrow",
+#     "huggingface-hub",
+#     "datasets",
+#     "einops",
 # ]
 # ///
 """HF Job: {name} (gen {gen_id})"""
