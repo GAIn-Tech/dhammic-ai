@@ -48,9 +48,10 @@ GENERATION_1 = [
 JOB_TEMPLATE = '''# /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "torch",
+#     "torch==2.6.0",
 #     "pytorch-lightning",
 #     "tiktoken",
+#     "rustbpe",
 #     "requests",
 #     "pyarrow",
 #     "huggingface-hub",
