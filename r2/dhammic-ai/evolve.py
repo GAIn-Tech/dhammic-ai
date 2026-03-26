@@ -413,11 +413,31 @@ def select_and_crossover(gen_id: int):
 
     next_id = gen_id + 1
     crossovers = []
+    seen_configs = set()  # Deduplicate identical configs
 
-    # Elites (top 3 with their actual overrides only)
-    for w in winners[:3]:
+    def config_key(overrides):
+        """Hashable key for deduplication."""
+        return tuple(sorted((k, v) for k, v in overrides.items()))
+
+    def short_name(prefix, overrides):
+        """Generate short descriptive name from overrides."""
+        parts = [prefix]
+        if "d_model" in overrides: parts.append(f"d{overrides['d_model']}")
+        if "n_layers" in overrides: parts.append(f"l{overrides['n_layers']}")
+        if "lr" in overrides: parts.append(f"lr{overrides['lr']:.0e}".replace("+", ""))
+        if "d_state" in overrides and overrides["d_state"] != 16: parts.append(f"ds{overrides['d_state']}")
+        if "engram_n_columns" in overrides and overrides["engram_n_columns"] != 2048: parts.append(f"eng{overrides['engram_n_columns']}")
+        if "sdr_dim" in overrides and overrides["sdr_dim"] != 2048: parts.append(f"sdr{overrides['sdr_dim']}")
+        if "n_heads" in overrides and overrides["n_heads"] != 8: parts.append(f"h{overrides['n_heads']}")
+        return "_".join(parts)
+
+    # Elites (top 3 with their actual overrides)
+    for i, w in enumerate(winners[:3]):
         cfg = extract_overrides(w)
-        crossovers.append({"name": f"{w['mutation']}_elite", "overrides": cfg})
+        key = config_key(cfg)
+        if key not in seen_configs:
+            seen_configs.add(key)
+            crossovers.append({"name": short_name(f"g{next_id}_elite{i+1}", cfg), "overrides": cfg})
 
     # Pairwise crossover — take architecture from w1, training/memory from w2
     ARCH_KEYS = ("d_model", "n_layers", "mamba_expand", "n_heads", "d_state")
@@ -425,11 +445,13 @@ def select_and_crossover(gen_id: int):
                    "engram_k_active", "engram_layer", "lora_rank")
     TRAIN_KEYS = ("lr",)
 
+    cross_idx = 0
     for i, w1 in enumerate(winners):
         for w2 in winners[i + 1:]:
+            if len(crossovers) >= 10:
+                break
             o1 = extract_overrides(w1)
             o2 = extract_overrides(w2)
-            # Architecture from w1, memory/training from w2
             merged = {}
             for k in ARCH_KEYS:
                 if k in o1: merged[k] = o1[k]
@@ -437,7 +459,13 @@ def select_and_crossover(gen_id: int):
             for k in (*MEMORY_KEYS, *TRAIN_KEYS):
                 if k in o2: merged[k] = o2[k]
                 elif k in o1: merged[k] = o1[k]
-            crossovers.append({"name": f"{w1['mutation']}+{w2['mutation']}", "overrides": merged})
+            key = config_key(merged)
+            if key not in seen_configs:
+                seen_configs.add(key)
+                cross_idx += 1
+                crossovers.append({"name": short_name(f"g{next_id}_cross{cross_idx}", merged), "overrides": merged})
+        if len(crossovers) >= 10:
+            break
 
     crossovers = crossovers[:10]
 
