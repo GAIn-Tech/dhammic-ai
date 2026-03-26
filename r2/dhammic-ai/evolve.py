@@ -187,7 +187,25 @@ GENERATION_6 = [
     {"name": "g6_d192_l4_h16", "overrides": {"d_model": 192, "n_layers": 4, "mamba_expand": 3, "lr": 1e-2, "n_heads": 16}},
 ]
 
-GENERATIONS = {1: GENERATION_1, 6: GENERATION_6}
+GENERATION_7 = [
+    # d160 champion variants (best balance: 1.603 bpb at 195k tok/s)
+    {"name": "g7_d160_l4_lr8e3", "overrides": {"d_model": 160, "n_layers": 4, "mamba_expand": 3, "lr": 8e-3, "n_heads": 8}},
+    {"name": "g7_d160_l4_lr1.5e2", "overrides": {"d_model": 160, "n_layers": 4, "mamba_expand": 3, "lr": 1.5e-2, "n_heads": 8}},
+    {"name": "g7_d160_l4_eng4k", "overrides": {"d_model": 160, "n_layers": 4, "mamba_expand": 3, "lr": 1e-2, "engram_n_columns": 4096, "engram_cells_per_col": 8}},
+    {"name": "g7_d160_l4_sdr4k", "overrides": {"d_model": 160, "n_layers": 4, "mamba_expand": 3, "lr": 1e-2, "sdr_dim": 4096, "sdr_k_active": 80}},
+    {"name": "g7_d160_l4_ds32", "overrides": {"d_model": 160, "n_layers": 4, "mamba_expand": 3, "lr": 1e-2, "d_state": 32}},
+    # Cross d160 x d192 (merge best bpb with best throughput)
+    {"name": "g7_d176_l4_lr1e2", "overrides": {"d_model": 176, "n_layers": 4, "mamba_expand": 3, "lr": 1e-2, "n_heads": 8}},
+    {"name": "g7_d176_l4_lr1.5e2", "overrides": {"d_model": 176, "n_layers": 4, "mamba_expand": 3, "lr": 1.5e-2, "n_heads": 8}},
+    # Wider exploration
+    {"name": "g7_d192_l4_lr1.5e2", "overrides": {"d_model": 192, "n_layers": 4, "mamba_expand": 3, "lr": 1.5e-2, "n_heads": 8}},
+    # Depth with throughput-friendly width
+    {"name": "g7_d128_l8_lr1e2", "overrides": {"d_model": 128, "n_layers": 8, "mamba_expand": 3, "lr": 1e-2, "n_heads": 8}},
+    # Speed king: can we get better bpb at max throughput?
+    {"name": "g7_d128_l4_lr1.5e2", "overrides": {"d_model": 128, "n_layers": 4, "mamba_expand": 3, "lr": 1.5e-2, "n_heads": 8}},
+]
+
+GENERATIONS = {1: GENERATION_1, 6: GENERATION_6, 7: GENERATION_7}
 
 
 def get_generation(gen_id: int) -> list:
@@ -365,37 +383,48 @@ def select_and_crossover(gen_id: int):
         print(f"  {w['mutation']}: val_bpb={w['val_bpb']} ({delta:+.2f}%)")
 
     # Crossover: pairwise + elites
-    # Dhammic-specific config keys for crossover
+    # Extract ONLY params that differ from DhammicConfig defaults (the actual mutations)
+    from dataclasses import fields as dc_fields
+    try:
+        from train import DhammicConfig
+        default_cfg = {f.name: f.default for f in dc_fields(DhammicConfig)
+                       if f.default is not f.default_factory if hasattr(f, 'default_factory') else True}
+    except Exception:
+        default_cfg = {}
+
     CROSSOVER_KEYS = (
         "d_model", "n_layers", "d_state", "n_heads", "mamba_expand",
         "sdr_dim", "sdr_k_active",
         "engram_n_columns", "engram_cells_per_col", "engram_k_active", "engram_layer",
-        "lora_rank",
+        "lora_rank", "lr",
     )
-    PAIRWISE_KEYS = (
-        "d_model", "n_layers", "d_state", "n_heads",
-        "sdr_dim", "sdr_k_active",
-        "engram_n_columns", "engram_cells_per_col", "engram_k_active",
-        "lora_rank",
-    )
+
+    def extract_overrides(result):
+        """Extract only params that differ from defaults — the actual mutation."""
+        full_cfg = result.get("config", {})
+        overrides = {}
+        for k in CROSSOVER_KEYS:
+            if k in full_cfg and full_cfg[k] != default_cfg.get(k):
+                overrides[k] = full_cfg[k]
+        return overrides
 
     next_id = gen_id + 1
     crossovers = []
 
-    # Elites (top 3 unchanged)
+    # Elites (top 3 with their actual overrides only)
     for w in winners[:3]:
-        cfg = {k: v for k, v in w.get("config", {}).items() if k in CROSSOVER_KEYS}
+        cfg = extract_overrides(w)
         crossovers.append({"name": f"{w['mutation']}_elite", "overrides": cfg})
 
-    # Pairwise crossover
+    # Pairwise crossover — merge actual overrides from both parents
     for i, w1 in enumerate(winners):
         for w2 in winners[i + 1:]:
-            merged = {}
-            for k, v in w1.get("config", {}).items():
-                if k in (*CROSSOVER_KEYS, "lr"):
-                    merged[k] = v
-            for k, v in w2.get("config", {}).items():
-                if k not in merged and k in PAIRWISE_KEYS:
+            o1 = extract_overrides(w1)
+            o2 = extract_overrides(w2)
+            # w1 provides base, w2 provides non-overlapping overrides
+            merged = {**o1}
+            for k, v in o2.items():
+                if k not in merged:
                     merged[k] = v
             crossovers.append({"name": f"{w1['mutation']}+{w2['mutation']}", "overrides": merged})
 
