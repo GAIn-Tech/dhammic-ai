@@ -24,7 +24,7 @@ from huggingface_hub import HfApi, get_token, run_uv_job
 CODE_REPO = "icarus112/dhammic-ai-code"
 RESULTS_REPO = "icarus112/dhammic-ai-results"
 FLAVOR = "a100-large"
-TIMEOUT = "15m"
+TIMEOUT = "3h"  # 50k+ steps on A100 with bf16
 GENERATIONS_DIR = Path("generations")
 RESULTS_FILE = Path("results.tsv")
 
@@ -102,7 +102,7 @@ _req.get = _authed_get
 
 print("[job] Preparing data (streaming) ...")
 from prepare import download_data, train_tokenizer
-download_data(num_shards=1)  # Minimal download, data recycles via infinite dataloader
+download_data(num_shards=5)  # 5 shards for 50k+ step runs
 train_tokenizer()
 
 # Call main(overrides) — train.py has DhammicConfig dataclass that accepts overrides
@@ -225,7 +225,34 @@ GENERATION_11 = [
     {"name": "g11_d128_l4_lora32", "overrides": {"d_model": 128, "n_layers": 4, "mamba_expand": 3, "lr": 1.5e-2, "lora_rank": 32}},
 ]
 
-GENERATIONS = {1: GENERATION_1, 6: GENERATION_6, 7: GENERATION_7, 11: GENERATION_11}
+GENERATION_12 = [
+    # GOAL: sub-1.0 val_bpb on A100-80GB with bf16 AMP
+    # Key insight: pretrain at 50k steps got 1.319, need bigger models + more compute
+    # All experiments use 50k steps (not 5-min budget) with bf16
+
+    # Scale up: d256/6L (the A100 default) — never properly tested with bf16
+    {"name": "g12_d256_l6_50k", "overrides": {"d_model": 256, "n_layers": 6, "mamba_expand": 3, "lr": 1.5e-2, "n_heads": 8, "max_steps": 50000, "batch_size": 32}},
+    # d256/8L — deeper
+    {"name": "g12_d256_l8_50k", "overrides": {"d_model": 256, "n_layers": 8, "mamba_expand": 3, "lr": 1e-2, "n_heads": 8, "max_steps": 50000, "batch_size": 16}},
+    # d384/4L — wider
+    {"name": "g12_d384_l4_50k", "overrides": {"d_model": 384, "n_layers": 4, "mamba_expand": 3, "lr": 1e-2, "n_heads": 8, "max_steps": 50000, "batch_size": 16}},
+    # d512/4L — very wide
+    {"name": "g12_d512_l4_50k", "overrides": {"d_model": 512, "n_layers": 4, "mamba_expand": 2, "lr": 8e-3, "n_heads": 8, "max_steps": 50000, "batch_size": 8}},
+    # d256/6L seq_len=2048 — longer context
+    {"name": "g12_d256_l6_seq2048", "overrides": {"d_model": 256, "n_layers": 6, "mamba_expand": 3, "lr": 1.5e-2, "n_heads": 8, "max_steps": 50000, "batch_size": 16, "seq_len": 2048}},
+    # d128/4L at 100k steps — champion config with 2x more training
+    {"name": "g12_d128_l4_100k", "overrides": {"d_model": 128, "n_layers": 4, "mamba_expand": 3, "lr": 1.5e-2, "n_heads": 8, "max_steps": 100000, "batch_size": 32}},
+    # d256/4L — wider than d128 champion but not as deep as 6L
+    {"name": "g12_d256_l4_50k", "overrides": {"d_model": 256, "n_layers": 4, "mamba_expand": 3, "lr": 1.5e-2, "n_heads": 16, "max_steps": 50000, "batch_size": 32}},
+    # d256/6L + larger engram
+    {"name": "g12_d256_l6_eng4k", "overrides": {"d_model": 256, "n_layers": 6, "mamba_expand": 3, "lr": 1.5e-2, "n_heads": 8, "max_steps": 50000, "batch_size": 32, "engram_n_columns": 4096, "engram_cells_per_col": 16}},
+    # d256/6L + ds32
+    {"name": "g12_d256_l6_ds32", "overrides": {"d_model": 256, "n_layers": 6, "mamba_expand": 3, "lr": 1.5e-2, "n_heads": 8, "max_steps": 50000, "batch_size": 32, "d_state": 32}},
+    # d256/6L + lower LR for longer training
+    {"name": "g12_d256_l6_lr8e3", "overrides": {"d_model": 256, "n_layers": 6, "mamba_expand": 3, "lr": 8e-3, "n_heads": 8, "max_steps": 50000, "batch_size": 32}},
+]
+
+GENERATIONS = {1: GENERATION_1, 6: GENERATION_6, 7: GENERATION_7, 11: GENERATION_11, 12: GENERATION_12}
 
 
 def get_generation(gen_id: int) -> list:
