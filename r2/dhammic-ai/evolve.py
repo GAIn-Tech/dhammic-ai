@@ -260,19 +260,8 @@ def launch_generation(gen_id: int):
         script_path.write_text(script)
 
         try:
-            # Upload job script to Hub so Docker container can fetch it
-            api.upload_file(
-                path_or_fileobj=str(script_path),
-                path_in_repo=script_path.name,
-                repo_id=CODE_REPO,
-                repo_type="dataset",
-            )
-            job = api.run_job(
-                image="pytorch/pytorch:2.6.0-cuda12.6-cudnn9-runtime",
-                command=["bash", "-c",
-                    "pip install -q pytorch-lightning tiktoken datasets huggingface-hub einops tensorboard requests pyarrow && "
-                    f"huggingface-cli download {CODE_REPO} {script_path.name} --repo-type dataset --local-dir /tmp/job && "
-                    f"cd /tmp/job && python {script_path.name}"],
+            job = run_uv_job(
+                str(script_path),
                 flavor=FLAVOR,
                 timeout=TIMEOUT,
                 secrets={"HF_TOKEN": token},
