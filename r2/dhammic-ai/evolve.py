@@ -24,7 +24,7 @@ from huggingface_hub import HfApi, get_token, run_uv_job
 CODE_REPO = "icarus112/dhammic-ai-code"
 RESULTS_REPO = "icarus112/dhammic-ai-results"
 FLAVOR = "a100-large"
-TIMEOUT = "3h"  # 50k+ steps on A100 with bf16
+TIMEOUT = "15m"  # 5-min training budget + setup overhead
 GENERATIONS_DIR = Path("generations")
 RESULTS_FILE = Path("results.tsv")
 
@@ -103,7 +103,7 @@ _req.get = _authed_get
 
 print("[job] Preparing data (streaming) ...")
 from prepare import download_data, train_tokenizer
-download_data(num_shards=5)  # 5 shards for 50k+ step runs
+download_data(num_shards=1)  # 1 shard for fast 5-min evolve runs
 train_tokenizer()
 
 # Call main(overrides) — train.py has DhammicConfig dataclass that accepts overrides
@@ -253,7 +253,22 @@ GENERATION_12 = [
     {"name": "g12_d256_l6_lr8e3", "overrides": {"d_model": 256, "n_layers": 6, "mamba_expand": 3, "lr": 8e-3, "n_heads": 8, "max_steps": 50000, "batch_size": 32}},
 ]
 
-GENERATIONS = {1: GENERATION_1, 6: GENERATION_6, 7: GENERATION_7, 11: GENERATION_11, 12: GENERATION_12}
+GENERATION_13 = [
+    # A100-scale configs on 5-min budget — bigger models learn faster per step
+    # d512 got 1.219 at 50k steps, what can it do in 5 min?
+    {"name": "g13_d512_l4_exp2", "overrides": {"d_model": 512, "n_layers": 4, "mamba_expand": 2, "lr": 8e-3, "n_heads": 8, "batch_size": 16}},
+    {"name": "g13_d512_l4_exp3", "overrides": {"d_model": 512, "n_layers": 4, "mamba_expand": 3, "lr": 8e-3, "n_heads": 8, "batch_size": 8}},
+    {"name": "g13_d384_l6", "overrides": {"d_model": 384, "n_layers": 6, "mamba_expand": 3, "lr": 1e-2, "n_heads": 8, "batch_size": 16}},
+    {"name": "g13_d512_l6", "overrides": {"d_model": 512, "n_layers": 6, "mamba_expand": 2, "lr": 8e-3, "n_heads": 8, "batch_size": 8}},
+    {"name": "g13_d768_l4", "overrides": {"d_model": 768, "n_layers": 4, "mamba_expand": 2, "lr": 5e-3, "n_heads": 8, "batch_size": 4}},
+    {"name": "g13_d256_l8", "overrides": {"d_model": 256, "n_layers": 8, "mamba_expand": 3, "lr": 1e-2, "n_heads": 8, "batch_size": 32}},
+    {"name": "g13_d384_l4_h16", "overrides": {"d_model": 384, "n_layers": 4, "mamba_expand": 3, "lr": 1e-2, "n_heads": 16, "batch_size": 16}},
+    {"name": "g13_d512_l4_ds32", "overrides": {"d_model": 512, "n_layers": 4, "mamba_expand": 2, "lr": 8e-3, "n_heads": 8, "batch_size": 16, "d_state": 32}},
+    {"name": "g13_d256_l12", "overrides": {"d_model": 256, "n_layers": 12, "mamba_expand": 3, "lr": 8e-3, "n_heads": 8, "batch_size": 16}},
+    {"name": "g13_d1024_l2", "overrides": {"d_model": 1024, "n_layers": 2, "mamba_expand": 2, "lr": 3e-3, "n_heads": 8, "batch_size": 4}},
+]
+
+GENERATIONS = {1: GENERATION_1, 6: GENERATION_6, 7: GENERATION_7, 11: GENERATION_11, 12: GENERATION_12, 13: GENERATION_13}
 
 
 def get_generation(gen_id: int) -> list:
