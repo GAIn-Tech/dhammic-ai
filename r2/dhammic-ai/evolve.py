@@ -221,9 +221,9 @@ def get_generation(gen_id: int) -> list:
     for line in gen_file.read_text().split("\n"):
         if line.startswith("|") and "---" not in line:
             parts = [p.strip() for p in line.split("|")]
-            if len(parts) >= 5 and parts[2] and parts[2] not in ("Name", ""):
+            if len(parts) >= 4 and parts[2] and parts[2] not in ("Name", ""):
                 name = parts[2]
-                cfg_str = parts[4] if len(parts) > 4 else "{}"
+                cfg_str = parts[3] if len(parts) > 3 else "{}"
                 overrides = {}
                 if cfg_str.strip() and cfg_str.strip() != "{}":
                     for pair in cfg_str.strip().strip("`").split(","):
