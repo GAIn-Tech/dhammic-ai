@@ -205,7 +205,29 @@ GENERATION_7 = [
     {"name": "g7_d128_l4_lr1.5e2", "overrides": {"d_model": 128, "n_layers": 4, "mamba_expand": 3, "lr": 1.5e-2, "n_heads": 8}},
 ]
 
-GENERATIONS = {1: GENERATION_1, 6: GENERATION_6, 7: GENERATION_7}
+GENERATION_11 = [
+    # Radical departures from converged d128/4L/lr=1.5e-2
+    # Push width: d144 (between 128 and 160)
+    {"name": "g11_d144_l4", "overrides": {"d_model": 144, "n_layers": 4, "mamba_expand": 3, "lr": 1.5e-2, "n_heads": 8}},
+    # Push depth: 5 layers (between 4 and 6)
+    {"name": "g11_d128_l5", "overrides": {"d_model": 128, "n_layers": 5, "mamba_expand": 3, "lr": 1.5e-2, "n_heads": 8}},
+    # Higher LR
+    {"name": "g11_d128_l4_lr2e2", "overrides": {"d_model": 128, "n_layers": 4, "mamba_expand": 3, "lr": 2e-2, "n_heads": 8}},
+    {"name": "g11_d128_l4_lr3e2", "overrides": {"d_model": 128, "n_layers": 4, "mamba_expand": 3, "lr": 3e-2, "n_heads": 8}},
+    # State dimension
+    {"name": "g11_d128_l4_ds32", "overrides": {"d_model": 128, "n_layers": 4, "mamba_expand": 3, "lr": 1.5e-2, "d_state": 32}},
+    {"name": "g11_d128_l4_ds64", "overrides": {"d_model": 128, "n_layers": 4, "mamba_expand": 3, "lr": 1.5e-2, "d_state": 64}},
+    # Engram scaling
+    {"name": "g11_d128_l4_eng4k", "overrides": {"d_model": 128, "n_layers": 4, "mamba_expand": 3, "lr": 1.5e-2, "engram_n_columns": 4096, "engram_cells_per_col": 16}},
+    # Expand factor
+    {"name": "g11_d128_l4_exp4", "overrides": {"d_model": 128, "n_layers": 4, "mamba_expand": 4, "lr": 1.5e-2, "n_heads": 8}},
+    # More heads
+    {"name": "g11_d128_l4_h16", "overrides": {"d_model": 128, "n_layers": 4, "mamba_expand": 3, "lr": 1.5e-2, "n_heads": 16}},
+    # LoRA rank
+    {"name": "g11_d128_l4_lora32", "overrides": {"d_model": 128, "n_layers": 4, "mamba_expand": 3, "lr": 1.5e-2, "lora_rank": 32}},
+]
+
+GENERATIONS = {1: GENERATION_1, 6: GENERATION_6, 7: GENERATION_7, 11: GENERATION_11}
 
 
 def get_generation(gen_id: int) -> list:

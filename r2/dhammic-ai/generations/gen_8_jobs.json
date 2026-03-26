@@ -1,16 +1,16 @@
 {
   "gen_id": 8,
   "jobs": {
-    "g7_d128_l4_lr1.5e2_elite": "ERROR: name 'api' is not defined",
-    "g7_d160_l4_lr1.5e2_elite": "ERROR: name 'api' is not defined",
-    "g7_d192_l4_lr1.5e2_elite": "ERROR: name 'api' is not defined",
-    "g7_d128_l4_lr1.5e2+g7_d160_l4_lr1.5e2": "ERROR: name 'api' is not defined",
-    "g7_d128_l4_lr1.5e2+g7_d192_l4_lr1.5e2": "ERROR: name 'api' is not defined",
-    "g7_d128_l4_lr1.5e2+g7_d176_l4_lr1.5e2": "ERROR: name 'api' is not defined",
-    "g7_d128_l4_lr1.5e2+g7_d160_l4_eng4k": "ERROR: name 'api' is not defined",
-    "g7_d128_l4_lr1.5e2+g7_d160_l4_ds32": "ERROR: name 'api' is not defined",
-    "g7_d128_l4_lr1.5e2+g7_d160_l4_sdr4k": "ERROR: name 'api' is not defined",
-    "g7_d128_l4_lr1.5e2+g7_d160_l4_lr8e3": "ERROR: name 'api' is not defined"
+    "g7_d128_l4_lr1.5e2_elite": "69c4ca0071691dc46f167424",
+    "g7_d160_l4_lr1.5e2_elite": "69c4ca0125abd6f920b4fb72",
+    "g7_d192_l4_lr1.5e2_elite": "69c4ca0125abd6f920b4fb74",
+    "g7_d128_l4_lr1.5e2+g7_d160_l4_lr1.5e2": "69c4ca0271691dc46f167426",
+    "g7_d128_l4_lr1.5e2+g7_d192_l4_lr1.5e2": "69c4ca0225abd6f920b4fb76",
+    "g7_d128_l4_lr1.5e2+g7_d176_l4_lr1.5e2": "69c4ca0225abd6f920b4fb78",
+    "g7_d128_l4_lr1.5e2+g7_d160_l4_eng4k": "69c4ca0325abd6f920b4fb7a",
+    "g7_d128_l4_lr1.5e2+g7_d160_l4_ds32": "69c4ca0371691dc46f16742a",
+    "g7_d128_l4_lr1.5e2+g7_d160_l4_sdr4k": "69c4ca0471691dc46f16742c",
+    "g7_d128_l4_lr1.5e2+g7_d160_l4_lr8e3": "69c4ca0471691dc46f16742e"
   },
-  "launched": 1774503541.679969
+  "launched": 1774504451.9962761
 }

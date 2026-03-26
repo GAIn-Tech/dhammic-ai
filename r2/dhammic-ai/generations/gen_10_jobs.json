@@ -1,0 +1,16 @@
+{
+  "gen_id": 10,
+  "jobs": {
+    "g7_d128_l4_lr1.5e2+g7_d160_l4_lr1.5e2_elite_elite": "69c4cd8071691dc46f167457",
+    "g7_d128_l4_lr1.5e2+g7_d192_l4_lr1.5e2+g7_d160_l4_lr1.5e2_elite_elite": "69c4cd8025abd6f920b4fb8a",
+    "g7_d128_l4_lr1.5e2+g7_d192_l4_lr1.5e2+g7_d128_l4_lr1.5e2+g7_d160_l4_lr1.5e2_elite": "69c4cd8125abd6f920b4fb8c",
+    "g7_d128_l4_lr1.5e2+g7_d160_l4_lr1.5e2_elite+g7_d128_l4_lr1.5e2+g7_d192_l4_lr1.5e2+g7_d160_l4_lr1.5e2_elite": "69c4cd8125abd6f920b4fb8e",
+    "g7_d128_l4_lr1.5e2+g7_d160_l4_lr1.5e2_elite+g7_d128_l4_lr1.5e2+g7_d192_l4_lr1.5e2+g7_d128_l4_lr1.5e2+g7_d160_l4_lr1.5e2": "69c4cd8225abd6f920b4fb90",
+    "g7_d128_l4_lr1.5e2+g7_d160_l4_lr1.5e2_elite+g7_d128_l4_lr1.5e2+g7_d192_l4_lr1.5e2+g7_d128_l4_lr1.5e2+g7_d176_l4_lr1.5e2": "69c4cd8225abd6f920b4fb92",
+    "g7_d128_l4_lr1.5e2+g7_d160_l4_lr1.5e2_elite+g7_d128_l4_lr1.5e2+g7_d192_l4_lr1.5e2_elite": "69c4cd8271691dc46f167459",
+    "g7_d128_l4_lr1.5e2+g7_d160_l4_lr1.5e2_elite+g7_d128_l4_lr1.5e2+g7_d192_l4_lr1.5e2+g7_d128_l4_lr1.5e2_elite": "69c4cd8325abd6f920b4fb94",
+    "g7_d128_l4_lr1.5e2+g7_d160_l4_lr1.5e2_elite+g7_d128_l4_lr1.5e2+g7_d192_l4_lr1.5e2+g7_d128_l4_lr1.5e2+g7_d160_l4_ds32": "69c4cd8371691dc46f16745b",
+    "g7_d128_l4_lr1.5e2+g7_d192_l4_lr1.5e2+g7_d160_l4_lr1.5e2_elite+g7_d128_l4_lr1.5e2+g7_d192_l4_lr1.5e2+g7_d128_l4_lr1.5e2+g7_d160_l4_lr1.5e2": "69c4cd8425abd6f920b4fb96"
+  },
+  "launched": 1774505347.6446853
+}
