@@ -1,0 +1,16 @@
+{
+  "gen_id": 14,
+  "jobs": {
+    "g14_elite1_d512_l4_lr8e-03": "69c5ac4371691dc46f167c06",
+    "g14_elite2_d512_l4_lr8e-03": "69c5ac4471691dc46f167c08",
+    "g14_elite3_d768_l4_lr5e-03": "69c5ac4625abd6f920b4feb8",
+    "g14_cross1_d512_l4_lr5e-03": "69c5ac4771691dc46f167c0a",
+    "g14_cross2_d512_l4_lr1e-02": "69c5ac4925abd6f920b4feba",
+    "g14_cross3_d512_l4_lr5e-03": "69c5ac4a71691dc46f167c0c",
+    "g14_cross4_d512_l4_lr1e-02": "69c5ac4b71691dc46f167c0e",
+    "g14_cross5_d768_l4_lr1e-02": "69c5ac4d25abd6f920b4febc",
+    "g14_cross6_d768_l4_lr8e-03": "69c5ac4e71691dc46f167c10",
+    "g14_cross7_d256_l8_lr1e-02": "69c5ac4f25abd6f920b4febe"
+  },
+  "launched": 1774562384.0913265
+}
