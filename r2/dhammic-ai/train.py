@@ -405,8 +405,10 @@ def main(overrides: dict | None = None):
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
-    # AMP scaler for mixed precision
-    scaler = torch.amp.GradScaler('cuda', enabled=(device == "cuda"))
+    # BF16 AMP does not need gradient scaling, and CUDA's GradScaler unscale path
+    # does not support bf16 parameter gradients. Keep a disabled scaler so the
+    # training loop can use the same scale/backward/step calls as fp16 paths.
+    scaler = torch.amp.GradScaler('cuda', enabled=False)
     autocast_ctx = torch.amp.autocast('cuda', dtype=torch.bfloat16, enabled=(device == "cuda"))
 
     # torch.compile is disabled — the fused-kernel autograd Functions don't
