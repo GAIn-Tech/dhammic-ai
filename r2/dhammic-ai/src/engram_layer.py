@@ -319,9 +319,20 @@ class FaithfulEngram(nn.Module):
         )  # (B, T, d_value), same dtype as embed.weight.
 
         # value & key projections.
-        retrieved_in_hs_dtype = retrieved.to(hidden_state.dtype)
-        v = self.value_proj(retrieved_in_hs_dtype)  # (B, T, d_model)
-        k = self.key_proj(retrieved_in_hs_dtype)    # (B, T, d_model)
+        # Under CUDA autocast, F.linear runs with autocast-cached bf16 weights even
+        # when module parameters are stored as fp32.  The fused lookup returns fp32,
+        # and hidden_state can also still be fp32 early in the pipeline, so choosing
+        # hidden_state.dtype here can create a mat1=float32 vs mat2=bf16 mismatch.
+        # Match the active autocast dtype for the projection inputs, then cast the
+        # residual contribution back to the backbone dtype at the end.
+        proj_dtype = hidden_state.dtype
+        is_autocast_enabled = getattr(torch, "is_autocast_enabled")
+        get_autocast_dtype = getattr(torch, "get_autocast_dtype")
+        if hidden_state.is_cuda and is_autocast_enabled("cuda"):
+            proj_dtype = get_autocast_dtype("cuda")
+        retrieved_for_proj = retrieved.to(proj_dtype)
+        v = self.value_proj(retrieved_for_proj)  # (B, T, d_model)
+        k = self.key_proj(retrieved_for_proj)    # (B, T, d_model)
 
         # Gate (paper Eq. 5):
         #   g = sigmoid( sqrt(|q·k|) * sign(q·k) )
