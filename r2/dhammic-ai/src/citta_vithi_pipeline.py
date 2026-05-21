@@ -16,6 +16,7 @@ Production-only: no eager fallback paths.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.checkpoint
 from typing import Optional, Tuple, Dict, Any
 import math
 from types import SimpleNamespace
