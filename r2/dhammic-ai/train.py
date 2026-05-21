@@ -24,6 +24,8 @@ from prepare import (
     MAX_SEQ_LEN, TIME_BUDGET, EVAL_TOKENS, VOCAB_SIZE,
 )
 from citta_vithi_pipeline import CittaVithiPipeline
+from kernels import FusedLMHeadXentModule
+from runtime.chunked_offload import ChunkedOffloadRunner
 
 # Performance: TF32 + cuDNN auto-tune (from autoresearch)
 torch.set_float32_matmul_precision('high')
@@ -67,6 +69,10 @@ class DhammicConfig:
     eval_interval: int = 200
     eval_steps: int = 5
     cosine_period: int = 10000      # SGDR warm restart cycle
+
+    # Chunked-offload runtime: enable streaming forward+backward when
+    # seq_len >= chunk_seq_len. 0 disables it (full-sequence path).
+    chunk_seq_len: int = 0
 
     # Derived (not user-set)
     vocab_size: int = 0             # Set at runtime from tokenizer
@@ -117,6 +123,19 @@ def create_model(config: DhammicConfig, device: str):
     return model.to(device)
 
 
+def create_loss_head(model: CittaVithiPipeline, config: DhammicConfig, device: str):
+    """Build the fused LM-head + cross-entropy module, tied to the input
+    embedding's dense weight. The head holds no separate parameter (the
+    weight is shared with ``model.embedding.dense_embed.weight``).
+    """
+    head = FusedLMHeadXentModule(
+        d_model=config.d_model,
+        vocab_size=config.vocab_size,
+        weight=model.embedding.dense_embed.weight,
+    )
+    return head.to(device)
+
+
 # -- LR schedule: cosine annealing with warm restarts (SGDR) ---------------
 
 def get_lr(step: int, warmup: int, max_lr: float, cosine_period: int):
@@ -131,6 +150,13 @@ def get_lr(step: int, warmup: int, max_lr: float, cosine_period: int):
 
 @torch.no_grad()
 def evaluate(model, val_loader, token_bytes, device, steps: int = 5):
+    """Validation pass — uses ``compute_logits()`` because BPB needs the
+    full logits tensor for per-token NLL (the fused training head only
+    returns scalar mean loss). Eval is N=5 batches, so the (M, V)
+    logits materialization is fine here.
+    """
+    # Unwrap a torch.compile wrapper if present
+    inner = getattr(model, "_orig_mod", model)
     model.eval()
     total_loss = 0.0
     total_tokens = 0
@@ -138,10 +164,21 @@ def evaluate(model, val_loader, token_bytes, device, steps: int = 5):
 
     for _ in range(steps):
         x, y, _ = next(val_loader)
-        logits = model(x)
-        if isinstance(logits, tuple):
-            logits = logits[0]
-        loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), y.reshape(-1), reduction="sum")
+        # The fused block runs with autocast disabled internally, but
+        # the surrounding model still expects bf16 paths. Wrap in
+        # autocast so the pipeline outside the block stays consistent.
+        with torch.amp.autocast("cuda", dtype=torch.bfloat16):
+            out = model(x)
+            if isinstance(out, tuple):
+                hidden = out[0]
+            else:
+                hidden = out
+            logits = inner.compute_logits(hidden)
+        loss = F.cross_entropy(
+            logits.reshape(-1, logits.size(-1)).float(),
+            y.reshape(-1),
+            reduction="sum",
+        )
         total_loss += loss.item()
         total_tokens += y.numel()
         total_bytes += token_bytes[y].sum().item()
@@ -156,9 +193,15 @@ def evaluate(model, val_loader, token_bytes, device, steps: int = 5):
 
 @torch.no_grad()
 def run_factual_eval(model, config: DhammicConfig, max_gen_tokens: int = 10):
-    """Evaluate factual prompts with greedy generation + perplexity."""
+    """Evaluate factual prompts with greedy generation + perplexity.
+
+    Uses ``compute_logits()`` to materialize per-token logits — the
+    autoregressive path needs them. This is only ~5 prompts of ~10
+    tokens each, so the (M, V) tensor is tiny.
+    """
     import tiktoken
 
+    inner = getattr(model, "_orig_mod", model)
     enc = tiktoken.get_encoding("o200k_base")
     model.eval()
     device = next(model.parameters()).device
@@ -180,10 +223,11 @@ def run_factual_eval(model, config: DhammicConfig, max_gen_tokens: int = 10):
             if len(generated) >= config.seq_len:
                 break
             x_in = torch.tensor([generated[-config.seq_len:]], dtype=torch.long, device=device)
-            logits = model(x_in)
-            if isinstance(logits, tuple):
-                logits = logits[0]
-            next_logits = logits[0, -1]
+            with torch.amp.autocast("cuda", dtype=torch.bfloat16):
+                hidden = model(x_in)
+                if isinstance(hidden, tuple):
+                    hidden = hidden[0]
+                next_logits = inner.compute_logits(hidden[:, -1:])[0, -1]
             next_token = next_logits.argmax().item()
             generated.append(next_token)
             decoded_last = enc.decode([next_token])
@@ -219,10 +263,12 @@ def run_factual_eval(model, config: DhammicConfig, max_gen_tokens: int = 10):
         if len(tokens) < 2:
             continue
         x = torch.tensor([tokens], dtype=torch.long, device=device)
-        logits = model(x)
-        if isinstance(logits, tuple):
-            logits = logits[0]
-        shift_logits = logits[0, :-1]
+        with torch.amp.autocast("cuda", dtype=torch.bfloat16):
+            hidden = model(x)
+            if isinstance(hidden, tuple):
+                hidden = hidden[0]
+            logits = inner.compute_logits(hidden)
+        shift_logits = logits[0, :-1].float()
         shift_labels = torch.tensor(tokens[1:], device=device)
         nll = F.cross_entropy(shift_logits, shift_labels, reduction="sum")
         total_nll += nll.item()
@@ -280,6 +326,7 @@ def main(overrides: dict | None = None):
     val_loader = iter(make_dataloader(tokenizer, batch_size, config.seq_len, "val"))
 
     model = create_model(config, device)
+    loss_head = create_loss_head(model, config, device)
     param_count = sum(p.numel() for p in model.parameters())
     print(f"Parameters: {param_count / 1e6:.2f}M")
     print(f"Architecture: d={config.d_model} n_layers={config.n_layers} expand={config.mamba_expand} "
@@ -291,15 +338,15 @@ def main(overrides: dict | None = None):
         dummy_x = torch.randint(0, vocab_size, (batch_size, config.seq_len), device=device)
         dummy_y = torch.randint(0, vocab_size, (batch_size, config.seq_len), device=device)
         try:
-            logits = model(dummy_x)
-            if isinstance(logits, tuple):
-                logits = logits[0]
-            loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), dummy_y.reshape(-1))
+            hidden = model(dummy_x)
+            if isinstance(hidden, tuple):
+                hidden = hidden[0]
+            loss = loss_head(hidden, dummy_y)
             loss.backward()
             peak = torch.cuda.max_memory_allocated() / 1024**3
             print(f"Peak VRAM (fwd+bwd): {peak:.2f} GB")
             model.zero_grad(set_to_none=True)
-            del dummy_x, dummy_y, logits, loss
+            del dummy_x, dummy_y, hidden, loss
             torch.cuda.empty_cache()
         except torch.cuda.OutOfMemoryError:
             print("OOM on probe! Reducing batch size...")
@@ -311,8 +358,15 @@ def main(overrides: dict | None = None):
             train_loader = iter(make_dataloader(tokenizer, batch_size, config.seq_len, "train"))
             val_loader = iter(make_dataloader(tokenizer, batch_size, config.seq_len, "val"))
 
+    # The loss head shares its weight with model.embedding.dense_embed.weight,
+    # so we don't need to add it to the optimizer separately — but we do
+    # want to include any other head params (none, in the tied case).
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=config.lr, betas=(0.9, 0.95),
+        list(model.parameters()) + [
+            p for p in loss_head.parameters()
+            if not any(p is m for m in model.parameters())
+        ],
+        lr=config.lr, betas=(0.9, 0.95),
         weight_decay=config.weight_decay, fused=(device == "cuda"),
     )
 
@@ -355,13 +409,15 @@ def main(overrides: dict | None = None):
     scaler = torch.amp.GradScaler('cuda', enabled=(device == "cuda"))
     autocast_ctx = torch.amp.autocast('cuda', dtype=torch.bfloat16, enabled=(device == "cuda"))
 
-    # torch.compile for fused kernels (skip on old drivers)
-    try:
-        if device == "cuda":
-            model = torch.compile(model)
-            print("torch.compile: enabled")
-    except Exception as e:
-        print(f"torch.compile: skipped ({e})")
+    # torch.compile is disabled — the fused-kernel autograd Functions don't
+    # interact well with the dynamo tracer (custom Tritrons + Function.apply).
+    # The kernels themselves are the fusion; no compile pass needed.
+
+    # Chunked-offload runner — engaged when seq_len >= chunk_seq_len > 0.
+    chunked_runner: ChunkedOffloadRunner | None = None
+    if config.chunk_seq_len > 0 and config.seq_len >= config.chunk_seq_len > 0:
+        chunked_runner = ChunkedOffloadRunner(device=torch.device(device))
+        print(f"ChunkedOffloadRunner enabled at chunk_seq_len={config.chunk_seq_len}")
 
     model.train()
     step = start_step
@@ -383,10 +439,18 @@ def main(overrides: dict | None = None):
         x, y, _ = next(train_loader)
         optimizer.zero_grad(set_to_none=True)
         with autocast_ctx:
-            logits = model(x)
-            if isinstance(logits, tuple):
-                logits = logits[0]
-            loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), y.reshape(-1))
+            # Chunked-offload path streams chunks through the model when
+            # enabled (long sequences); otherwise plain forward.
+            if chunked_runner is not None:
+                hidden = chunked_runner.forward(model, x.cpu(), config.chunk_seq_len)
+                hidden = hidden.to(device, non_blocking=True)
+            else:
+                hidden = model(x)
+                if isinstance(hidden, tuple):
+                    hidden = hidden[0]
+            # K9: fused LM-head + cross-entropy, no (M, V) logits ever
+            # materialized.
+            loss = loss_head(hidden, y)
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)

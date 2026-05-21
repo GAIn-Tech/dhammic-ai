@@ -1,0 +1,33 @@
+name: dhammic-pretrain
+
+resources:
+  accelerators: L4:1
+  use_spot: true
+
+num_nodes: 1
+
+setup: |
+  pip install torch pytorch-lightning tiktoken requests pyarrow huggingface-hub datasets einops
+  huggingface-cli download icarus112/dhammic-ai-code --repo-type dataset --local-dir /tmp/dhammic
+  cd /tmp/dhammic
+  python -c "
+  import os; os.environ['HF_TOKEN'] = os.environ.get('HF_TOKEN', '')
+  import requests as _req
+  _orig = _req.get
+  def _auth(url, **kw):
+      t = os.environ.get('HF_TOKEN')
+      if t and 'huggingface.co' in url: kw.setdefault('headers', {})['Authorization'] = f'Bearer {t}'
+      return _orig(url, **kw)
+  _req.get = _auth
+  from prepare import download_data, train_tokenizer
+  download_data(num_shards=5)
+  train_tokenizer()
+  print('Data ready')
+  "
+
+run: |
+  cd /tmp/dhammic
+  python train.py '{"d_model": 128, "n_layers": 4, "mamba_expand": 3, "lr": 0.015, "n_heads": 8, "max_steps": 50000, "batch_size": 16}'
+
+envs:
+  HF_TOKEN: null

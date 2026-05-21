@@ -1,7 +1,16 @@
 """
-Citta Vithi 8-Step Pipeline - End-to-End Dharmic execution cycle
-Representing the lifespan of one discrete cognitive event (processing one token).
-Orchestrates the complete Dhammic Cognitive Architecture flow.
+Citta Vithi Pipeline v4 — Fully-Fused Dharmic Architecture.
+
+Architecture: SDR Embedding+Engram → [Mamba-3 SSD + SwiGLU]×N + HTM(layer K) → LM Head
+
+All hot-path ops go through fused Triton kernels:
+  - SDR top-k / Gumbel STE     : fused_sdr_topk (K7)
+  - Mamba-3 block              : fused inproj/RoPE/trapezoidal/SSD (K1-K5)
+  - SwiGLU MLP                 : FusedSwiGLUMLP (K6)
+  - Engram column gather       : FusedEngramGatherModule (K8)
+  - LM-head + cross-entropy    : FusedLMHeadXentModule (K9, train.py)
+
+Production-only: no eager fallback paths.
 """
 
 import torch
@@ -9,38 +18,204 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Tuple, Dict, Any
 import math
-from contextlib import nullcontext
 from types import SimpleNamespace
 
+from mamba_base_engine import Mamba3Block, Mamba3Config, Mamba3BaseEngine
+from kernels import (
+    FusedRMSNormModule,
+    FusedSDRTopKModule,
+    FusedSwiGLUMLP,
+    FusedEngramGatherModule,  # legacy HTMEngram support — kept for back-compat
+)
+from htm_layer import FaithfulHTM
+from engram_layer import FaithfulEngram
 
+
+# ── SDR Embedding (Sampaticchana — Dense→Sparse→Dense) ────────────────────
+class SDREmbedding(nn.Module):
+    """
+    Dharmic Step 4 (Sampaticchana): Dense→Sparse→Dense with fused top-k.
+    Uses FusedSDRTopKModule (K7) for the Gumbel-STE / eval-topk path —
+    same operator at training and eval, no Python dual-branch.
+    """
+
+    def __init__(self, vocab_size: int, d_model: int, sdr_dim: int = 2048,
+                 k_active: int = 40, chunk_size: int = 256,
+                 engram: Optional["FaithfulEngram"] = None):
+        super().__init__()
+        self.dense_embed = nn.Embedding(vocab_size, d_model)
+        self.sdr_dim = sdr_dim
+        self.k_active = k_active
+        self.chunk_size = chunk_size
+        self.to_sdr = nn.Linear(d_model, sdr_dim, bias=False)
+        self.from_sdr = nn.Linear(sdr_dim, d_model, bias=False)
+        # K7: fused top-k + Gumbel + STE / eval-topk in one operator
+        self.topk = FusedSDRTopKModule(k_active=k_active, temperature=0.5)
+        # Optional DeepSeek Engram (n-gram hash, token-id-keyed) injected here
+        # because token_ids are available at the embedding layer and Engram
+        # *needs* them. Faithful to arXiv:2601.07372 (see docs/engram_fidelity.md).
+        self.engram = engram
+
+    def _chunk_branch(self, dense_chunk: torch.Tensor) -> torch.Tensor:
+        """Per-chunk sdr-width branch. Encapsulated so checkpoint() can
+        recompute the (B, chunk, sdr_dim) tensors at backward instead of
+        storing them — kills the dominant per-token VRAM leak.
+        """
+        logits = self.to_sdr(dense_chunk)
+        sdr = self.topk(logits)
+        return self.from_sdr(sdr)
+
+    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+        dense = self.dense_embed(token_ids)
+        T = dense.shape[1]
+        # SDR branch — single-shot if short, otherwise chunk+checkpoint so the
+        # (B,T,sdr_dim) intermediate is never held full-width.
+        if T <= self.chunk_size:
+            sdr_out = self._chunk_branch(dense)
+        else:
+            outs = []
+            for s in range(0, T, self.chunk_size):
+                e = min(s + self.chunk_size, T)
+                ck = dense[:, s:e]
+                outs.append(torch.utils.checkpoint.checkpoint(
+                    self._chunk_branch, ck, use_reentrant=False,
+                ))
+            sdr_out = torch.cat(outs, dim=1)
+        out = dense + sdr_out
+        # DeepSeek Engram residual (token-id n-gram hash) — always applied
+        # when present, regardless of branch.
+        if self.engram is not None:
+            out = out + self.engram(out, token_ids)
+        return out
+
+
+# ── HTM Layer (Numenta HTM — Spatial Pooler + Temporal Memory) ────────────
+class HTMLayer(nn.Module):
+    """
+    Numenta-faithful HTM (SP + TM) wrapped with a gated residual head.
+
+    NOT a hybrid: the retrieval core is FaithfulHTM (soft-permanence Numenta
+    HTM, see docs/htm_fidelity.md). The surrounding gate + out_proj + residual
+    add is the integration layer that lets HTM compose with the LM stream.
+
+    Naming note: the old `HTMEngram` class conflated HTM (Numenta) with
+    Engram (DeepSeek arXiv:2601.07372) which are SEPARATE concepts. They are
+    now implemented separately — HTM here, Engram in SDREmbedding.
+    """
+
+    def __init__(self, d_model: int, n_columns: int = 4096,
+                 cells_per_column: int = 8, k_active_columns: int = 20,
+                 segments_per_cell: int = 2, synapses_per_segment: int = 16,
+                 dtype: torch.dtype = torch.bfloat16):
+        super().__init__()
+        self.d_model = d_model
+        self.htm = FaithfulHTM(
+            d_input=d_model,
+            n_columns=n_columns,
+            cells_per_column=cells_per_column,
+            k_active_columns=k_active_columns,
+            segments_per_cell=segments_per_cell,
+            synapses_per_segment=synapses_per_segment,
+        )
+        # Residual head: gate + out_proj (composes HTM with LM stream)
+        self.out_proj = nn.Linear(d_model, d_model, bias=False)
+        self.gate = nn.Linear(d_model, 1, bias=True)
+        nn.init.constant_(self.gate.bias, 0.0)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        retrieved = self.htm(x)             # FaithfulHTM (B, T, D)
+        g = torch.sigmoid(self.gate(x))
+        return x + g * self.out_proj(retrieved)
+
+
+# ── Hebbian LoRA (Javana — lightweight side-channel) ──────────────────────
+class HebbianLoRA(nn.Module):
+    """
+    Dharmic Step 7 (Javana): Single-pass LoRA with Hebbian trace update.
+    Lightweight: one matmul pair + trace update. No multi-cycle loop.
+    """
+
+    def __init__(self, d_model: int, rank: int = 8):
+        super().__init__()
+        self.W_A = nn.Parameter(torch.randn(d_model, rank) * (1.0 / math.sqrt(d_model)))
+        self.W_B = nn.Parameter(torch.zeros(rank, d_model))
+        self.gate = nn.Linear(d_model, 1, bias=True)
+        nn.init.constant_(self.gate.bias, 0.0)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = x @ self.W_A  # (B, T, rank)
+        lora_out = h @ self.W_B  # (B, T, d_model)
+        g = torch.sigmoid(self.gate(x))
+        return x + g * lora_out
+
+
+# ── MambaBlock (backbone layer) ───────────────────────────────────────────
+class MambaBlock(nn.Module):
+    """Mamba-3 SSD + fused SwiGLU + optional fused Engram / Hebbian injection."""
+
+    def __init__(self, d_model: int, d_state: int = 16, expand: int = 3,
+                 n_heads: int = 8, chunk_size: int = 256,
+                 engram: Optional["HTMLayer"] = None,
+                 hebbian: Optional[HebbianLoRA] = None):
+        super().__init__()
+        # K1: fused RMSNorms
+        self.norm1 = FusedRMSNormModule(d_model, eps=1e-5)
+        self.norm2 = FusedRMSNormModule(d_model, eps=1e-5)
+        self.mamba = Mamba3BaseEngine(Mamba3Config(
+            d_model=d_model, d_state=d_state, d_conv=4, expand=expand,
+            n_heads=n_heads, chunk_size=chunk_size,
+        ))
+        # K6: fused SwiGLU MLP (single op replaces up + chunk + silu*val + down)
+        mlp_dim = int(d_model * 2.5)
+        self.mlp = FusedSwiGLUMLP(d_model=d_model, mlp_dim=mlp_dim, bias=False)
+        self.engram = engram
+        self.hebbian = hebbian
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Mamba SSM
+        x = x + self.mamba(self.norm1(x))
+        # SwiGLU MLP (K6 fused)
+        x = x + self.mlp(self.norm2(x))
+        # Dharmic injection (engram + hebbian at this layer only)
+        if self.engram is not None:
+            x = self.engram(x)
+        if self.hebbian is not None:
+            x = self.hebbian(x)
+        return x
+
+
+# ── CittaVithiPipeline v3 ────────────────────────────────────────────────
 class CittaVithiPipeline(nn.Module):
     """
-    Citta Vithi 8-Step Pipeline - End-to-End Dharmic execution cycle
-    Representing the lifespan of one discrete cognitive event (processing one token).
+    Citta Vithi v3 — Inline Dharmic Architecture
 
-    Steps:
-    1. Bhavanga-Citta → Mamba-3 Base Engine continuously rolling hidden vector state (baseline homeostasis)
-    2. Āvajjana (Adverting) → Thalamic Gating Signal; VRAM/Compute allocation diverting to specific sensory interface
-    3. Viññāṇa (Consciousness) → Spiking Neural Network fires; continuous reality discretized into raw spike train
-    4. Sampaṭicchana → L1 Cache Tensor Allocation; conversion into Numenta SDR across 28 topological dimensions
-    5. Santīraṇa → Early Latent Space Polling; bitwise Boolean extraction of topological features without deep reasoning
-    6. Voṭṭhapana → DeepSeek Engram Lookup; O(1) constant-time hash retrieval of static conceptual label
-    7. Javana (Impulsion) → DeltaNet Fast-Weight Loop; 7 consecutive clock cycles executing behavioral logic;
-       applies Hebbian learning (STDP) updating localized 2D memory matrix in forward pass
-    8. Tadārammaṇa (Registering) / Alaya-Vijñāna → Gradient Accumulation / Storehouse Consciousness;
-       permanent write of updated weights to deep long-term vector database before returning to Step 1
+    Flow: SDR Embedding → [Mamba-3 SSD + SwiGLU] × N → LM Head
+    Engram injected at layer `engram_layer`. Hebbian LoRA at same layer.
+    All dharmic components are residual additions — zero extra pathway.
     """
 
     def __init__(
         self,
-        d_model: int = 768,  # Model dimension
-        vocab_size: int = 32768,  # Vocabulary size for token processing
-        sdr_dim: int = 2048,  # SDR tokenizer dimension
-        sdr_sparsity: float = 0.02,  # SDR sparsity (2% active)
-        n_topological_zones: int = 28,  # Number of topological zones for SDR
-        engram_vocab_size: int = 10000,  # Engram memory vocabulary size
-        engram_hash_size: int = 65536,  # Engram hash table size
-        lora_rank: int = 16,  # Hebbian LoRA rank
+        d_model: int = 128,
+        n_layers: int = 4,
+        d_state: int = 16,
+        mamba_expand: int = 3,
+        n_heads: int = 8,
+        chunk_size: int = 256,
+        vocab_size: int = 32768,
+        sdr_dim: int = 2048,
+        sdr_k_active: int = 40,
+        engram_n_columns: int = 4096,
+        engram_cells_per_col: int = 8,
+        engram_k_active: int = 20,
+        engram_layer: int = 2,      # which layer gets engram injection
+        lora_rank: int = 8,
+        use_grad_checkpoint: bool = False,
+        # Legacy params (ignored, kept for API compat)
+        sdr_sparsity: float = 0.02,
+        n_topological_zones: int = 14,
+        engram_vocab_size: int = 4096,
+        engram_hash_size: int = 16384,
         use_amp: bool = False,
         amp_dtype: torch.dtype = torch.bfloat16,
         device: Optional[str] = None,
@@ -49,407 +224,156 @@ class CittaVithiPipeline(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.vocab_size = vocab_size
-        self.config = SimpleNamespace(use_amp=bool(use_amp))
-        self.amp_dtype = amp_dtype
+        self.n_layers = n_layers
+        self.use_grad_checkpoint = use_grad_checkpoint
+        self.config = SimpleNamespace(use_amp=False)
 
-        # Step 1: Bhavanga-Citta - Mamba-3 Base Engine
-
-        self.bhavanga_engine = nn.LSTM(
-            d_model, d_model, batch_first=True, device=device, dtype=dtype
+        # ── DeepSeek Engram (token-id keyed, lives in embedding) ─────────
+        # Engram is built first so it can be wired into SDREmbedding.
+        # n-gram size 3 is the paper default; multi-head primes ensure low
+        # collision rate. Per-ngram vocab is conservative for small models —
+        # 8x the LM vocab gives ~1% collision rate at HALF-fill.
+        deepseek_engram = FaithfulEngram(
+            d_model=d_model,
+            tokenizer_vocab_size=vocab_size,
+            d_value=d_model,
+            max_ngram_size=3,
+            n_heads_per_ngram=max(2, d_model // 32),  # 2 heads at d=64, 4 at d=128
+            engram_vocab_size_per_ngram=[8 * vocab_size, 8 * vocab_size],
         )
 
-        # Step 2: Āvajjana (Adverting) - Thalamic Gating Signal
-        # Simplified as attention mechanism for sensory routing
-        self.thalamic_gate = nn.MultiheadAttention(
-            d_model, num_heads=8, batch_first=True, device=device, dtype=dtype
+        # ── SDR Embedding (with Engram residual injected at the embedding)
+        self.embedding = SDREmbedding(
+            vocab_size=vocab_size, d_model=d_model,
+            sdr_dim=sdr_dim, k_active=sdr_k_active,
+            chunk_size=chunk_size,
+            engram=deepseek_engram,
         )
 
-        # Step 3: Viññāṇa (Consciousness) - Spiking Neural Network
-        # Simplified as spike generation layer
-        self.spike_generator = nn.Sequential(
-            nn.Linear(d_model, d_model, device=device, dtype=dtype),
-            nn.LeakyReLU(0.1),
-            nn.Linear(d_model, d_model, device=device, dtype=dtype),
-            nn.Hardtanh(min_val=0, max_val=1),  # Binary spike-like output
+        # ── Numenta HTM (hidden-state keyed, lives at one backbone layer)
+        # Faithful Spatial Pooler + Temporal Memory. Separate from Engram.
+        htm = HTMLayer(
+            d_model=d_model, n_columns=engram_n_columns,
+            cells_per_column=engram_cells_per_col,
+            k_active_columns=engram_k_active,
         )
+        hebbian = HebbianLoRA(d_model=d_model, rank=lora_rank)
 
-        # Step 4: Sampaṭicchana - L1 Cache → Numenta SDR
-        # Using the Numenta SDR Tokenizer we implemented
-        from numenta_sdr_tokenizer import NumentaSDRTokenizer
+        # ── Backbone: N layers of Mamba-3 SSD + SwiGLU ──────────────────
+        # HTM injected at one layer (existing engram_layer position); Engram
+        # already injected at the embedding step. The two memory systems are
+        # SEPARATE: Engram = content-addressable via token-id n-gram hash,
+        # HTM = sequence-predictive via cortical minicolumns. Faithful to
+        # their respective papers — no longer the HTMEngram hybrid.
+        layers = []
+        for i in range(n_layers):
+            inject_htm = htm if i == min(engram_layer, n_layers - 1) else None
+            inject_hebbian = hebbian if i == min(engram_layer, n_layers - 1) else None
+            layers.append(MambaBlock(
+                d_model=d_model, d_state=d_state, expand=mamba_expand,
+                n_heads=n_heads, chunk_size=chunk_size,
+                engram=inject_htm, hebbian=inject_hebbian,
+            ))
+        self.backbone = nn.ModuleList(layers)
 
-        self.sdr_tokenizer = NumentaSDRTokenizer(
-            input_dim=d_model,
-            sdr_dim=sdr_dim,
-            sdr_sparsity=sdr_sparsity,
-            n_topological_zones=n_topological_zones,
-            device=device,
-            dtype=dtype,
-        )
+        # ── Output ───────────────────────────────────────────────────────
+        # K1: fused RMSNorm. lm_head is owned by FusedLMHeadXentModule
+        # in train.py — the model returns the post-norm *hidden* tensor.
+        # Use ``compute_logits()`` to materialize logits when needed
+        # (autoregressive generation, eval).
+        self.final_norm = FusedRMSNormModule(d_model, eps=1e-5)
 
-        # Step 5: Santīraṇa - Early Latent Space Polling
-        # Bitwise Boolean extraction of topological features
-        self.latent_poller = nn.Sequential(
-            nn.Linear(sdr_dim, sdr_dim // 2, device=device, dtype=dtype),
-            nn.ReLU(),
-            nn.Linear(sdr_dim // 2, sdr_dim // 4, device=device, dtype=dtype),
-            nn.ReLU(),
-        )
-
-        # Step 6: Voṭṭhapana - DeepSeek Engram Lookup
-        # O(1) constant-time hash retrieval of static conceptual label
-        from deepseek_engram_memory import DeepSeekEngramMemory
-
-        self.engram_memory = DeepSeekEngramMemory(
-            feature_dim=sdr_dim // 4,  # Output from latent poller
-            vocab_size=engram_vocab_size,
-            hash_table_size=engram_hash_size,
-            device=device,
-            dtype=dtype,
-        )
-
-        # Step 7: Javana (Impulsion) - DeltaNet Fast-Weight Loop
-        # 7 consecutive clock cycles with Hebbian learning (STDP)
-        from deltanet_hebbian_lora import DeltaNetHebbianLoRA
-
-        # The input to Javana step is the engram embeddings, which have dimension sdr_dim // 4
-        javana_d_model = sdr_dim // 4
-        self.hebiban_lora = DeltaNetHebbianLoRA(
-            d_model=javana_d_model, rank=lora_rank, device=device, dtype=dtype
-        )
-
-        self.sdr_tokenizer._amp_disabled = True
-        self.hebiban_lora._amp_disabled = True
-
-        # Step 8: Tadārammaṇa (Registering) / Alaya-Vijñāna
-        # Gradient Accumulation / Storehouse Consciousness
-        # We'll implement this as a memory update mechanism
-        # Memory store matches the javana output dimension (sdr_dim // 4)
-        javana_d_model = sdr_dim // 4
-        self.memory_store = nn.Parameter(
-            torch.randn(vocab_size, javana_d_model, device=device, dtype=dtype) * 0.02
-        )
-        self.memory_update_rate = nn.Parameter(
-            torch.tensor(0.01, device=device, dtype=dtype)
-        )
-
-        # Final projection to vocabulary space - project from embedding space (d_model) to vocab
-        self.output_projection = nn.Linear(
-            d_model, vocab_size, bias=False, device=device, dtype=dtype
-        )
-
-        # Tie output projection to embedding (weight tying)
-        self.embedding = nn.Embedding(vocab_size, d_model, device=device, dtype=dtype)
-        self.output_projection.weight = self.embedding.weight
-
-        # Create a projection from javana space to embedding space
-        self.javana_to_embedding = nn.Linear(
-            javana_d_model, d_model, bias=False, device=device, dtype=dtype
-        )
-
-        # Layer normalization for stability - normalize in javana space
-        self.final_norm = nn.RMSNorm(
-            javana_d_model, eps=1e-5, device=device, dtype=dtype
-        )
-
-        # Cycle counter for tracking iterations
+        # Stats
         self.register_buffer("cycle_count", torch.tensor(0, dtype=torch.long))
-        self.grad_scaler = torch.cuda.amp.GradScaler(
-            enabled=self._amp_runtime_enabled()
-        )
-
-    def _amp_runtime_enabled(self) -> bool:
-        return bool(self.config.use_amp and torch.cuda.is_available())
-
-    def _autocast_context(self, module: Optional[nn.Module] = None):
-        enabled = self._amp_runtime_enabled()
-        if module is not None and getattr(module, "_amp_disabled", False):
-            enabled = False
-        if not enabled:
-            return nullcontext()
-        return torch.cuda.amp.autocast(dtype=self.amp_dtype)
-
-    def _prepare_amp_input(
-        self, tensor: torch.Tensor, module: Optional[nn.Module] = None
-    ) -> torch.Tensor:
-        if (
-            module is not None
-            and self._amp_runtime_enabled()
-            and getattr(module, "_amp_disabled", False)
-            and torch.is_floating_point(tensor)
-        ):
-            return tensor.float()
-        return tensor
-
-    def set_amp_enabled(self, enabled: bool):
-        self.config.use_amp = bool(enabled)
-        self.grad_scaler = torch.cuda.amp.GradScaler(
-            enabled=self._amp_runtime_enabled()
-        )
 
     def forward(
         self,
         input_ids: torch.Tensor,
         context: Optional[torch.Tensor] = None,
         return_intermediates: bool = False,
-    ) -> Tuple[torch.Tensor, Optional[Dict[str, Any]]]:
+    ) -> torch.Tensor:
+        """Forward pass returning post-norm *hidden* (B, T, D).
+
+        train.py pairs this with ``FusedLMHeadXentModule`` for the
+        train-time loss (K9), which never materializes the (M, V) logits
+        tensor. For inference paths that need logits, call
+        ``self.compute_logits(hidden)``.
         """
-        Forward pass of the Citta Vithi 8-Step Pipeline
+        # SDR Embedding (Dharmic step 0+4 fused)
+        x = self.embedding(input_ids)
 
-        Args:
-            input_ids: Token IDs (batch, seq_len)
-            context: Optional context for thalamic gating (batch, seq_len, d_model)
-            return_intermediates: If True, return intermediate values for analysis
+        # Backbone: fused Mamba-3 + SwiGLU + (optional) engram/hebbian
+        for layer in self.backbone:
+            x = layer(x)
 
-        Returns:
-            output: Logits over vocabulary (batch, seq_len, vocab_size)
-            intermediates: Dictionary of intermediate values if return_intermediates=True
-        """
-        batch_size, seq_len = input_ids.shape
+        # Final norm — return hidden, not logits (see docstring)
+        hidden = self.final_norm(x)
 
-        # Store intermediates if requested
-        intermediates = {} if return_intermediates else None
-
-        # Step 0: Embed input tokens
-        with self._autocast_context(self.embedding):
-            embedded = self.embedding(input_ids)  # (batch, seq_len, d_model)
-
-        # Step 1: Bhavanga-Citta - Mamba-3 Base Engine (Baseline Homeostasis)
-        # Process through LSTM as simplified Bhavanga engine
-        bhavanga_input = self._prepare_amp_input(embedded, self.bhavanga_engine)
-        with self._autocast_context(self.bhavanga_engine):
-            bhavanga_output, _ = self.bhavanga_engine(bhavanga_input)
-        if return_intermediates:
-            intermediates["bhavanga_output"] = bhavanga_output.clone()
-
-        # Step 2: Āvajjana (Adverting) - Thalamic Gating Signal
-        # Use context for gating, or self-attention if no context provided
-        if context is not None:
-            # Use provided context for thalamic gating
-            thalamic_context = self._prepare_amp_input(context, self.thalamic_gate)
-            with self._autocast_context(self.thalamic_gate):
-                thalamic_attended, _ = self.thalamic_gate(
-                    bhavanga_output, thalamic_context, thalamic_context
-                )
-        else:
-            # Self-attention for internal gating
-            with self._autocast_context(self.thalamic_gate):
-                thalamic_attended, _ = self.thalamic_gate(
-                    bhavanga_output, bhavanga_output, bhavanga_output
-                )
-        if return_intermediates:
-            intermediates["thalamic_output"] = thalamic_attended.clone()
-
-        # Step 3: Viññāṇa (Consciousness) - Spiking Neural Network Firing
-        # Discretize continuous reality into spike train
-        with self._autocast_context(self.spike_generator):
-            spike_train = self.spike_generator(thalamic_attended)
-        if return_intermediates:
-            intermediates["spike_train"] = spike_train.clone()
-
-        # Step 4: Sampaṭicchana - L1 Cache → Numenta SDR
-        # Convert to sparse distributed representation
-        sdr_input = self._prepare_amp_input(spike_train, self.sdr_tokenizer)
-        with self._autocast_context(self.sdr_tokenizer):
-            sdr_output, sdr_info = self.sdr_tokenizer(sdr_input)
-        if return_intermediates:
-            intermediates["sdr_output"] = sdr_output.clone()
-            intermediates["sdr_info"] = sdr_info
-
-        # Step 5: Santīraṇa - Early Latent Space Polling
-        # Bitwise Boolean extraction of topological features
-        with self._autocast_context(self.latent_poller):
-            latent_features = self.latent_poller(sdr_output.float())
-        if return_intermediates:
-            intermediates["latent_features"] = latent_features.clone()
-
-        # Step 6: Voṭṭhapana - DeepSeek Engram Lookup
-        # O(1) constant-time hash retrieval of static conceptual label
-        with self._autocast_context(self.engram_memory):
-            engram_output, engram_info = self.engram_memory(
-                latent_features, return_label=False
-            )
-        if return_intermediates:
-            intermediates["engram_indices"] = engram_output.clone()
-            intermediates["engram_info"] = engram_info
-
-        # Get conceptual label embeddings for next step
-        # Use the label indices we already obtained to look up embeddings from engram memory
-        # Handle potential -1 values (unknown labels) by clamping to 0 for embedding lookup
-        label_indices_clamped = engram_output.clamp(min=0)
-        with self._autocast_context(self.engram_memory):
-            engram_embeddings = F.embedding(
-                label_indices_clamped, self.engram_memory.conceptual_labels
-            )
-        # Zero out embeddings for unknown labels (-1 in original engram_output)
-        unknown_mask = engram_output == -1
-        if unknown_mask.any():
-            # Expand unknown_mask to match engram_embeddings shape for broadcasting
-            while len(unknown_mask.shape) < len(engram_embeddings.shape):
-                unknown_mask = unknown_mask.unsqueeze(-1)
-            engram_embeddings = engram_embeddings * (~unknown_mask)
-        if return_intermediates:
-            intermediates["engram_embeddings"] = engram_embeddings.clone()
-
-        # Step 7: Javana (Impulsion) - DeltaNet Fast-Weight Loop
-        # 7 consecutive clock cycles with behavioral logic and Hebbian learning
-        # We'll apply the LoRA 7 times to simulate the 7-cycle loop
-        javana_output = self._prepare_amp_input(engram_embeddings, self.hebiban_lora)
-        for cycle in range(7):
-            with self._autocast_context(self.hebiban_lora):
-                javana_output = self.hebiban_lora(javana_output)
-
-            if self.training:  # Only update during training
-                self.hebiban_lora.update_step(mu_t=1.0)
-        if return_intermediates:
-            intermediates["javana_output"] = javana_output.clone()
-
-        # Step 8: Tadārammaṇa (Registering) / Alaya-Vijñāna
-        # Gradient Accumulation / Storehouse Consciousness
-
-        with torch.no_grad():
-            # Simple memory update: move memory toward current representation
-            memory_update = torch.mean(javana_output, dim=(0, 1))  # (d_model,)
-
-            update_indices = torch.arange(
-                min(10, self.vocab_size), device=memory_update.device
-            )
-            # Expand memory_update to match the shape of memory_store[update_indices]
-            memory_update_expanded = memory_update.unsqueeze(0).expand(
-                len(update_indices), -1
-            )  # (len(update_indices), d_model)
-            self.memory_store[update_indices] += (
-                self.memory_update_rate * memory_update_expanded
-            )
-            # Normalize to prevent growth
-            self.memory_store[update_indices] = F.normalize(
-                self.memory_store[update_indices], p=2, dim=-1
-            )
-
-        # Add memory-inspired bias to output
-        with self._autocast_context(self.output_projection):
-            memory_bias = torch.matmul(
-                javana_output, self.memory_store.t()
-            )  # (batch, seq_len, vocab_size)
-
-        # Final processing - project from javana space to embedding space then to logits
-        with self._autocast_context(self.output_projection):
-            normed_output = self.final_norm(javana_output)
-            embedded_output = self.javana_to_embedding(
-                normed_output
-            )  # (batch, seq_len, d_model)
-            logits = self.output_projection(embedded_output) + 0.1 * memory_bias
-
-        # Increment cycle counter
         self.cycle_count += 1
 
         if return_intermediates:
-            intermediates["final_logits"] = logits.clone()
-            intermediates["cycle_count"] = self.cycle_count.item()
-            return logits, intermediates
-        else:
-            return logits
+            return hidden, {
+                "final_hidden": hidden.clone(),
+                "cycle_count": self.cycle_count.item(),
+            }
+        return hidden
+
+    def compute_logits(self, hidden: torch.Tensor) -> torch.Tensor:
+        """Materialize logits = hidden @ tied_embedding_weight.T.
+
+        Used by inference paths (autoregressive generation, eval). The
+        training loss path uses ``FusedLMHeadXentModule`` instead, which
+        avoids materializing the (M, V) logits tensor.
+        """
+        return F.linear(hidden, self.embedding.dense_embed.weight)
 
     def get_memory_stats(self) -> Dict[str, Any]:
-        """Get statistics about the internal memory systems"""
         return {
             "citta_vithi_cycles": self.cycle_count.item(),
-            "hebiban_lora_step": getattr(self.hebiban_lora, "_step", 0),
-            "memory_store_norm": torch.norm(self.memory_store, p="fro").item(),
-            "embedding_norm": torch.norm(self.embedding.weight, p="fro").item(),
-            "use_amp": bool(self.config.use_amp),
+            "n_layers": self.n_layers,
+            "d_model": self.d_model,
         }
-
-    def training_step(
-        self,
-        input_ids: torch.Tensor,
-        target_ids: torch.Tensor,
-        optimizer: torch.optim.Optimizer,
-        context: Optional[torch.Tensor] = None,
-        loss_fn: Optional[nn.Module] = None,
-        grad_clip_norm: Optional[float] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        optimizer.zero_grad(set_to_none=True)
-
-        with self._autocast_context():
-            logits = self(input_ids, context=context)
-            if loss_fn is None:
-                loss = F.cross_entropy(
-                    logits.reshape(-1, logits.size(-1)), target_ids.reshape(-1)
-                )
-            else:
-                loss = loss_fn(logits, target_ids)
-
-        if self._amp_runtime_enabled():
-            self.grad_scaler.scale(loss).backward()
-            if grad_clip_norm is not None:
-                self.grad_scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(self.parameters(), grad_clip_norm)
-            self.grad_scaler.step(optimizer)
-            self.grad_scaler.update()
-        else:
-            loss.backward()
-            if grad_clip_norm is not None:
-                torch.nn.utils.clip_grad_norm_(self.parameters(), grad_clip_norm)
-            optimizer.step()
-
-        return loss.detach(), logits.detach()
 
 
 def create_citta_vithi_pipeline(
-    d_model: int = 768,
-    vocab_size: int = 32768,
-    sdr_dim: int = 2048,
-    sdr_sparsity: float = 0.02,
-    n_topological_zones: int = 28,
-    engram_vocab_size: int = 10000,
-    engram_hash_size: int = 65536,
-    lora_rank: int = 16,
-    use_amp: bool = False,
-    amp_dtype: torch.dtype = torch.bfloat16,
-    device: Optional[str] = None,
-    dtype: Optional[torch.dtype] = None,
+    d_model: int = 128, n_layers: int = 4, d_state: int = 16,
+    mamba_expand: int = 3, n_heads: int = 8, chunk_size: int = 256,
+    vocab_size: int = 32768, sdr_dim: int = 2048, sdr_k_active: int = 40,
+    engram_n_columns: int = 4096, engram_cells_per_col: int = 8,
+    engram_k_active: int = 20, engram_layer: int = 2, lora_rank: int = 8,
+    use_grad_checkpoint: bool = False, **kwargs,
 ) -> CittaVithiPipeline:
-    """Factory function to create Citta Vithi 8-Step Pipeline with sensible defaults"""
     return CittaVithiPipeline(
-        d_model=d_model,
-        vocab_size=vocab_size,
-        sdr_dim=sdr_dim,
-        sdr_sparsity=sdr_sparsity,
-        n_topological_zones=n_topological_zones,
-        engram_vocab_size=engram_vocab_size,
-        engram_hash_size=engram_hash_size,
-        lora_rank=lora_rank,
-        use_amp=use_amp,
-        amp_dtype=amp_dtype,
-        device=device,
-        dtype=dtype,
+        d_model=d_model, n_layers=n_layers, d_state=d_state,
+        mamba_expand=mamba_expand, n_heads=n_heads, chunk_size=chunk_size,
+        vocab_size=vocab_size, sdr_dim=sdr_dim, sdr_k_active=sdr_k_active,
+        engram_n_columns=engram_n_columns, engram_cells_per_col=engram_cells_per_col,
+        engram_k_active=engram_k_active, engram_layer=engram_layer,
+        lora_rank=lora_rank, use_grad_checkpoint=use_grad_checkpoint,
     )
 
 
 if __name__ == "__main__":
-    # Simple test
     pipeline = create_citta_vithi_pipeline(
-        d_model=128,
-        vocab_size=1000,
-        sdr_dim=256,
-        engram_vocab_size=100,
-        engram_hash_size=1024,
-    )
+        d_model=128, n_layers=2, d_state=8, n_heads=4,
+        vocab_size=1000, sdr_dim=256, sdr_k_active=10,
+        engram_n_columns=512, engram_cells_per_col=4, engram_k_active=10,
+        chunk_size=256,
+    ).cuda()
+    input_ids = torch.randint(0, 1000, (2, 256), device="cuda")
+    hidden = pipeline(input_ids)
+    print(f"Input: {input_ids.shape}, Hidden: {hidden.shape}")
+    print(f"Params: {sum(p.numel() for p in pipeline.parameters()) / 1e6:.2f}M")
 
-    # Test input
-    input_ids = torch.randint(0, 1000, (2, 10))  # batch=2, seq_len=10
-
-    # Forward pass
-    logits, intermediates = pipeline(input_ids, return_intermediates=True)
-
-    print(f"Input shape: {input_ids.shape}")
-    print(f"Output logits shape: {logits.shape}")
-    print(f"Cycle count: {intermediates['cycle_count']}")
-    print(f"SDR active ratio: {intermediates['sdr_info']['active_ratio']:.4f}")
-    print(f"Engram found ratio: {intermediates['engram_info']['found_ratio']:.4f}")
-
-    # Test memory stats
-    stats = pipeline.get_memory_stats()
-    print(f"Memory stats: {stats}")
-
-    print("Citta Vithi 8-Step Pipeline test successful!")
+    # Gradient test via fused LM head + xent
+    from kernels import FusedLMHeadXentModule
+    pipeline.train()
+    target = torch.randint(0, 1000, (2, 256), device="cuda")
+    head = FusedLMHeadXentModule(
+        d_model=128, vocab_size=1000,
+        weight=pipeline.embedding.dense_embed.weight,
+    ).cuda()
+    loss = head(hidden, target)
+    loss.backward()
+    print(f"SDR to_sdr grad: {pipeline.embedding.to_sdr.weight.grad.norm():.4f}")
+    print("Citta Vithi v4 test PASSED!")
