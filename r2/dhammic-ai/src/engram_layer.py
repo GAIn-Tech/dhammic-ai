@@ -323,13 +323,10 @@ class FaithfulEngram(nn.Module):
         # when module parameters are stored as fp32.  The fused lookup returns fp32,
         # and hidden_state can also still be fp32 early in the pipeline, so choosing
         # hidden_state.dtype here can create a mat1=float32 vs mat2=bf16 mismatch.
-        # Match the active autocast dtype for the projection inputs, then cast the
-        # residual contribution back to the backbone dtype at the end.
-        proj_dtype = hidden_state.dtype
-        is_autocast_enabled = getattr(torch, "is_autocast_enabled")
-        get_autocast_dtype = getattr(torch, "get_autocast_dtype")
-        if hidden_state.is_cuda and is_autocast_enabled("cuda"):
-            proj_dtype = get_autocast_dtype("cuda")
+        # Match projection parameter dtype. FaithfulEngram casts itself to bf16
+        # during init, so this must be bf16 even outside an autocast context
+        # (e.g. the train.py VRAM probe before the main AMP loop).
+        proj_dtype = self.value_proj.weight.dtype
         retrieved_for_proj = retrieved.to(proj_dtype)
         v = self.value_proj(retrieved_for_proj)  # (B, T, d_model)
         k = self.key_proj(retrieved_for_proj)    # (B, T, d_model)
@@ -337,11 +334,12 @@ class FaithfulEngram(nn.Module):
         # Gate (paper Eq. 5):
         #   g = sigmoid( sqrt(|q·k|) * sign(q·k) )
         # where q = norm_q(hidden_state), k = norm_k(k).
-        q_n = self.norm_q(hidden_state)
+        gate_input = hidden_state.to(k.dtype)
+        q_n = self.norm_q(gate_input)
         k_n = self.norm_k(k)
         qk = (q_n * k_n).sum(dim=-1, keepdim=True) / math.sqrt(self.d_model)
         gate = (qk.abs().clamp_min(1e-6).sqrt() * qk.sign()).sigmoid()
-        return gate * v
+        return (gate * v).to(hidden_state.dtype)
 
     def extra_repr(self) -> str:
         return (
