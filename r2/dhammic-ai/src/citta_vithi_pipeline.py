@@ -124,9 +124,12 @@ class HTMLayer(nn.Module):
         nn.init.constant_(self.gate.bias, 0.0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        retrieved = self.htm(x)             # FaithfulHTM (B, T, D)
-        g = torch.sigmoid(self.gate(x))
-        return x + g * self.out_proj(retrieved)
+        residual_dtype = x.dtype
+        proj_dtype = self.out_proj.weight.dtype
+        retrieved = self.htm(x).to(proj_dtype)  # FaithfulHTM (B, T, D)
+        gate_in = x.to(self.gate.weight.dtype)
+        g = torch.sigmoid(self.gate(gate_in)).to(proj_dtype)
+        return (x.to(proj_dtype) + g * self.out_proj(retrieved)).to(residual_dtype)
 
 
 # ── Hebbian LoRA (Javana — lightweight side-channel) ──────────────────────
@@ -144,10 +147,12 @@ class HebbianLoRA(nn.Module):
         nn.init.constant_(self.gate.bias, 0.0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h = x @ self.W_A  # (B, T, rank)
+        residual_dtype = x.dtype
+        work = x.to(self.W_A.dtype)
+        h = work @ self.W_A  # (B, T, rank)
         lora_out = h @ self.W_B  # (B, T, d_model)
-        g = torch.sigmoid(self.gate(x))
-        return x + g * lora_out
+        g = torch.sigmoid(self.gate(work))
+        return (work + g * lora_out).to(residual_dtype)
 
 
 # ── MambaBlock (backbone layer) ───────────────────────────────────────────
